@@ -24,12 +24,6 @@ generate_data_volatiliy_sinusoid <- function(num_of_trials, noise, max, min, sta
   return(data)
 }
 
-# x <- seq(-0.5*pi, 2.5*pi, length.out = 100)
-# y <- sin(x)*27/2+16.5
-# plot(1:100, sin(x)*27/2+16.5, type = "l")
-
-
-
 generate_data_volatiliy_block <- function(num_of_trials, noise, block1_vol, block2_vol, start_state) {
   data <- data.frame(Volatility = rep(block1_vol, num_of_trials), State = start_state, Observation = rnorm(1, mean = start_state, sd = noise))
   for (t in 2:num_of_trials) {
@@ -55,11 +49,7 @@ generate_data_volatiliy_block <- function(num_of_trials, noise, block1_vol, bloc
 # data <- generate_data_volatiliy_sinusoid(num_of_trials = 100, noise = 4, max = 30, min = 3, start_state = 0)
 data <- generate_data_volatiliy_block(num_of_trials = 100, noise = 4, block1_vol = 3, block2_vol = 30, start_state = 0)
 
- plot(1:100, data$Observation+100, type = "l", ylab = "Share price", xlab = "Day (t)")
-# plot(1:100, data$Volatility, type = "l", ylab = "Volatility", xlab = "Day (t)")
-
-
-
+plot(1:100, data$Observation+100, type = "l", ylab = "Share price", xlab = "Day (t)")
 
 # Plotting generated data ----
 
@@ -141,7 +131,6 @@ pf_bootstrap <- function(y, num_of_particles) {
   return(rowSums(sqrt(Ta)*Wa))
 }
 
-
 pf_straight <- function(y, num_of_particles) {
   # The same filter without resampling (straightforward SIS)
   # create matrices to store the particle values and weights
@@ -174,17 +163,15 @@ pf_straight <- function(y, num_of_particles) {
   
 }
 
-
 est_vol_bootstrap <- pf_bootstrap(y = data$Observation, num_of_particles = 2000)
 est_vol_straight <- pf_straight(y = data$Observation, num_of_particles = 2000)
-
 
 # Plotting filters ----
 
 plot(1:length(data$Volatility), data$Volatility, ylab="Value", xlab="Time point (t)", type = "l")
 lines(est_vol_bootstrap, col = "red")
 lines(est_vol_straight, col = "green")
-legend(c(0, max(data$Volatility)), lty = c(1,1,1), col = c("black", "red", "green"), legend = c("Actual vol","Bootstrap filter (c=1)","SIS (c=0)"), bty="n") 
+legend(c(0, max(data$Volatility)), lty = c(1,1,1), col = c("black", "red", "green"), legend = c("Actual vol","Bootstrap filter (c=1)","SIS (c=0)"), bty="n")
 
 # Simulating participant ----
 
@@ -212,14 +199,14 @@ participant_ignoring_volatility <- function(estim_noise, learning_rate, observat
   return(pred)
 }
 
-pred <- participant_tracking_volatility(estim_noise = 4, estim_vol = est_vol_bootstrap, observations = data$Observation)
-# pred <- participant_ignoring_volatility(estim_noise = 4, learning_rate = 0.5, observations = data$Observation)
+# pred <- participant_tracking_volatility(estim_noise = 4, estim_vol = est_vol_bootstrap, observations = data$Observation)
+pred <- participant_ignoring_volatility(estim_noise = 4, learning_rate = 0.5, observations = data$Observation)
 
 par(mfrow=c(1,1))
 plot(data$Observation, type = "l", lty = 2)
 lines(data$State)
 lines(pred, col = "green")
-legend(c(0, max(data$Observation)), lty = c(2,1,1), col = c("black", "black", "green"), legend = c("Observations","States","Predictions"), bty="n") 
+legend(c(0, max(data$Observation)), lty = c(2,1,1), col = c("black", "black", "green"), legend = c("Observations","States","Predictions"), bty="n")
 
 
 # Recovering model ----
