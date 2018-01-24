@@ -1,3 +1,5 @@
+#parsing data ----
+
 library(jsonlite)
 alldata <- fromJSON(txt="~/Downloads/resproj-27787-export (14).json") #worked on 3, 5, 9
 
@@ -27,7 +29,9 @@ for (user in users) {
   }
 }
 
-#block ratio analysis
+#simple ratio analysis ----
+
+#block
 block_low <- block_high <- array()
 i <- 1
 for (user in names(ratios_block)) {
@@ -50,7 +54,8 @@ sum(block_high)/length(block_high)
 plot(1:length(block_low), block_low, col = "blue", type = "l")
 lines(1:length(block_low), block_high, col = "red")
 
-#sinusoid ratio analysis
+#sinusoid
+
 sin_low <- sin_high <- array()
 i <- 1
 for (user in names(ratios_sinusoid)) {
@@ -73,7 +78,7 @@ sum(sin_high)/length(sin_high)
 plot(1:length(sin_low), sin_low, col = "blue", type = "l", ylim = c(0,5))
 lines(1:length(sin_low), sin_high, col = "red")
 
-#regressions for block
+#regression analysis (mixed effects model) ----
 volatility_block <- c(rep(3,24),rep(30,25),rep(3,25),rep(30,26))
 volatility_sinusoid <- sin(seq(-0.5*pi, 2.5*pi, length.out = 100))*(27)/2 + (((27)/2) + 3)
 
@@ -101,8 +106,121 @@ library(lmerTest)
 model <- lmer(update ~ error * volatility * set + (error|id), data = long)
 summary(model)
 
-#filters (from ResProj_0.4, but now changed)
+model1 <- lmer(update ~ error * volatility * set + (error*volatility|id), data = long)
+summary(model1)
 
+model2 <- lmer(update ~ error + error : (volatility + set + volatility:set) + (error + error:volatility|id), data = long)
+summary(model2)
+
+#estimating learning rate from the model
+long$set_as_number[long$set == "block"] <- -1
+long$set_as_number[long$set == "sinusoid"] <- 1
+long$eta <- long$error * (0.735  + 0.006 * long$volatility - 0.081 * long$set_as_number + 0.004 * long$set_as_number * long$volatility)
+
+ids <- unique(long$id)
+etas <- data.frame(long$eta[long$id == ids[1]])
+for (n in 2:length(ids)) {
+  etas <-  data.frame(etas, long$eta[long$id == ids[n]])
+}
+etas <- rowSums(etas)/length(names(etas))
+plot(1:100, etas, type = "l")
+
+#fitting bootstrap filter ----
+ll_pf_bootstrap <- function(par, y, r, num_of_particles = 1000) { #that also should take y, r, and num_of_pacticles as input variables. Though, num_of_particles is not to be optimsed at the moment.
+  # set parametrers
+  # num_of_particles = 1000 #that is just for testing, to be removed
+  # y <- long$locations[long$id == "3GeaVBWYDmYTCN1pa7OkP7gKwCO2"] #that is just for testing, to be removed
+  # r <- long$prediction[long$id == "3GeaVBWYDmYTCN1pa7OkP7gKwCO2"] #that is just for testing, to be removed
+  
+  sd_ta = exp(par[1]) #sd of particle update distribution
+  sd_y = exp(par[2]) #noise of observations, real one was 4
+  sd_r = exp(par[3]) #noise of participants' responses, unknown
+  # Bootstrap filter
+  # create matrices to store the particle values and weights
+  n <- length(y)
+  Ta <- Wa <- s <- k <- estim_state <- matrix(NA, ncol = num_of_particles, nrow = n) 
+  
+  # draw the particles for the initial state from the prior distribution
+  
+  Ta[1,] <- runif(num_of_particles, 0, 30^2)
+  estim_state[1,] <- rep(0, num_of_particles)
+  k[1:2,] <- rep(0, num_of_particles)
+  s[1:2,] <- rep(1000, num_of_particles)
+  
+  Wa[1,] <- 1/num_of_particles
+  
+  # loop over time
+  for(t in 1:(n-1)) {
+    
+    # sample particles according to the transition distribution
+    
+    Ta[t+1,] <- rtruncnorm(num_of_particles, a = 0, b = Inf, mean=Ta[t,], sd=sd_ta)
+    
+    k[t+1,] <- (s[t,] + Ta[t,]) / (s[t,] + Ta[t,] + 4^2)
+    s[t+1,] <- (1 - k[t+1,])*(s[t,] + Ta[t,])
+    estim_state[t+1,] <- estim_state[t,] + k[t+1,] * (y[t] - estim_state[t,])
+    
+    # compute the weights
+    Wa[t+1,] <- dnorm(y[t+1], mean = estim_state[t,], sd = sqrt(s[t+1,] + Ta[t+1,] + sd_y^2)) * Wa[t,] # could have multiplied by W, but not necessary with uniform weights
+    Wa[t+1,] <- Wa[t+1,]/sum(Wa[t+1,]) # normalize
+    
+    # draw indices of particles with systematic resampling
+    idx <- resample_systematic(Wa[t+1,])
+    
+    # implicitly W <- 1/num_of_particles
+    Ta[t+1,] <- Ta[t+1,idx]
+    k[t+1,] <- k[t+1,idx]
+    s[t+1,] <- s[t+1,idx]
+    estim_state[t+1,] <- estim_state[t+1,idx]
+    
+    # reset the weights
+    Wa[t+1,] <- 1/num_of_particles
+  }
+  
+  ## implement Kalman filter to give mu (predicted means)
+  estim_vol <- rowSums(sqrt(Ta)*Wa)
+  eta <- 0
+  pred <- 0
+  n <- length(y) - 1
+  
+  for (t in 1:n) {
+    eta[t+1] <- estim_vol[t+1]^2 / (estim_vol[t+1]^2 + sd_y)
+    pred[t+1] <- pred[t] + eta[t+1] * (y[t] - pred[t])
+  }
+  
+  mu <- pred
+  # return(pred)
+  
+  logLik <- -2*sum(dnorm(r,mean=mu,sd=sd_r,log=TRUE))	
+  return(logLik)
+}
+
+estimated_par <- list()
+estimated_par <- optim(log(c(1,4,4)), ll_pf_bootstrap)
+
+for(i in unique(long$id)) {
+  data <- subset(long, id==i)
+  estimated_par[[i]] <- optim(log(c(1,4,4)), fn = ll_pf_bootstrap, y = data$locations, r = data$prediction)
+}
+
+prl <- function(i) {
+  data <- subset(long, id==i)
+  estimated_par[[i]] <- optim(log(c(1,4,4)), fn = ll_pf_bootstrap, y = data$locations, r = data$prediction)
+}
+
+# Calculate the number of cores
+no_cores <- detectCores() - 1
+
+# Initiate cluster
+cl <- makeCluster(no_cores, type = "FORK")
+
+parLapply(cl, unique(long$id), fun = prl)
+
+stopCluster(cl)
+
+
+
+#filters (from ResProj_0.4, but now changed)
 resample_systematic <- function(weights) {
   # input: weights is a vector of length N with (unnormalized) importance weights
   # output: a vector of length N with indices of the replicated particles
