@@ -103,13 +103,13 @@ long$set <- factor(long$set)
 contrasts(long$set) <- contr.helmert(2)
 
 library(lmerTest)
-model <- lmer(update ~ error * volatility * set + (error|id), data = long)
+model <- lmer(update ~ error * volatility * set + (error|id), data = long, REML = FALSE)
 summary(model)
 
 model1 <- lmer(update ~ error * volatility * set + (error*volatility|id), data = long)
 summary(model1)
 
-model2 <- lmer(update ~ error + error : (volatility + set + volatility:set) + (error + error:volatility|id), data = long)
+model2 <- lmer(update ~ error + error : (volatility + set + volatility:set) + (error + error:volatility|id), REML = FALSE, data = long)
 summary(model2)
 
 #estimating learning rate from the model
@@ -268,6 +268,7 @@ for (i in 1:length(params_btsrt_fixed_ta)) {
 }
 summary(2*2 + logLik_btsrt_fixed_ta)
 sd(2*2 + logLik_btsrt_fixed_ta)
+
 summary(2*3 + logLik_btsrt_var_ta)
 sd(2*3 + logLik_btsrt_var_ta)
 
