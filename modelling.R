@@ -103,13 +103,13 @@ long$set <- factor(long$set)
 contrasts(long$set) <- contr.helmert(2)
 
 library(lmerTest)
-model <- lmer(update ~ error * volatility * set + (error|id), data = long)
+model <- lmer(update ~ error * volatility * set + (error|id), data = long, REML = FALSE)
 summary(model)
 
 model1 <- lmer(update ~ error * volatility * set + (error*volatility|id), data = long)
 summary(model1)
 
-model2 <- lmer(update ~ error + error : (volatility + set + volatility:set) + (error + error:volatility|id), data = long)
+model2 <- lmer(update ~ error + error : (volatility + set + volatility:set) + (error + error:volatility|id), REML = FALSE, data = long)
 summary(model2)
 
 #estimating learning rate from the model
@@ -159,7 +159,7 @@ ll_pf_bootstrap <- function(par, ta0=FALSE, y, r, num_of_particles = 1000, rando
   if(ta0) {
     sd_ta = 0
   } else {
-    sd_ta = exp(par[3]) #sd of particle update distribution
+    sd_ta = exp(par[2]) #sd of particle update distribution
   }
   # other defaults
   logTa_mean0 <- log(0.2)
@@ -218,6 +218,7 @@ ll_pf_bootstrap <- function(par, ta0=FALSE, y, r, num_of_particles = 1000, rando
     # reset the weights
     Wa[t+1,] <- 1/num_of_particles
   }
+
   logLik <- -2*sum(dnorm(r, mean=mu_out, sd=sd_r, log=TRUE))
   return(logLik)
 }
@@ -251,7 +252,7 @@ library(parallel)
 prl_optimisation_btsrt_var_ta <- function(i) {
   data <- subset(long, id==i)
   est_par <- as.character(unique(data$id))
-  est_par <- c(est_par, optim(log(c(4,4,1)), method = "SANN", fn = ll_pf_bootstrap, ta0 = FALSE, y = data$locations, r = data$prediction))
+  est_par <- c(est_par, optim(log(c(4,1)), method = "SANN", fn = ll_pf_bootstrap, ta0 = FALSE, y = data$locations, r = data$prediction))
   return(est_par)
 }
 prl_optimisation_btsrt_fixed_ta <- function(i) {
@@ -274,6 +275,7 @@ for (i in 1:length(params_btsrt_fixed_ta)) {
 }
 summary(2*2 + logLik_btsrt_fixed_ta)
 sd(2*2 + logLik_btsrt_fixed_ta)
+
 summary(2*3 + logLik_btsrt_var_ta)
 sd(2*3 + logLik_btsrt_var_ta)
 
