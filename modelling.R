@@ -147,38 +147,54 @@ resample_systematic <- function(weights) {
   }
   return(idx)
 }
-ll_pf_bootstrap <- function(par, ta0, y, r, num_of_particles = 1000) { #that also should take y, r, and num_of_pacticles as input variables. Though, num_of_particles is not to be optimsed at the moment.
-  # set parametrers
+
+ll_pf_bootstrap <- function(par, ta0=FALSE, y, r, num_of_particles = 1000, random_seed=12345) { #that also should take y, r, and num_of_pacticles as input variables. Though, num_of_particles is not to be optimsed at the moment.
+
+  # set random seed
+  set.seed(random_seed)
   
+  # set parameters
   sd_y = exp(par[1]) #noise of observations, real one was 4
-  sd_r = 1 #exp(par[2]) #noise of participants' responses, unknown
-  if (ta0) {
+  sd_r = exp(par[2]) #noise of participants' responses, unknown
+  if(ta0) {
     sd_ta = 0
   } else {
     sd_ta = exp(par[2]) #sd of particle update distribution
   }
+  # other defaults
+  logTa_mean0 <- log(0.2)
+  logTa_sd0 <- 1.0
+  estim_mean0 <- 0.5 # should set this to the middle of the screen!
+  estim_var0 <- 1.0
+  
   # Bootstrap filter
   # create matrices to store the particle values and weights
   n <- length(y)
-  Ta <- Wa <- s <- k <- estim_state <- matrix(NA, ncol = num_of_particles, nrow = n) 
+  logTa <- Ta <- Wa <- s <- k <- estim_state <- matrix(NA, ncol = num_of_particles, nrow = n)
+  mu_out <- rep(0.0,n)
   
   # draw the particles for the initial state from the prior distribution
-  
-  Ta[1,] <- runif(num_of_particles, 0, 30^2)
-  estim_state[1,] <- rep(0, num_of_particles)
-  k[1:2,] <- rep(0, num_of_particles)
-  s[1:2,] <- rep(1000, num_of_particles)
-  
+  logTa[1,] <- rnorm(num_of_particles, mean=logTa_mean0, sd=logTa_sd0)
+  # derived other particle values
+  Ta[1,] <- exp(logTa[1,])
+  estim_state[1,] <- rep(estim_mean0, num_of_particles)
+  k[1:2,] <- rep(0.0, num_of_particles)
+  s[1:2,] <- rep(estim_var0, num_of_particles)
+  # particle weights
   Wa[1,] <- 1/num_of_particles
+  # save mu for output
+  mu_out[1] <- sum(Wa[1,]*estim_state[1,])
   
   # loop over time
   for(t in 1:(n-1)) {
     
     # sample particles according to the transition distribution
+    logTa[t+1,] <- rnorm(num_of_particles, mean=logTa[t,], sd=sd_ta)
     
-    Ta[t+1,] <- rtruncnorm(num_of_particles, a = 0, b = Inf, mean=Ta[t,], sd=sd_ta)
+    # compute derived other particle values
+    Ta[t+1,] <- exp(logTa[t+1,])
     
-    k[t+1,] <- (s[t,] + Ta[t,]) / (s[t,] + Ta[t,] + 4^2)
+    k[t+1,] <- (s[t,] + Ta[t,]) / (s[t,] + Ta[t,] + sd_y^2)
     s[t+1,] <- (1 - k[t+1,])*(s[t,] + Ta[t,])
     estim_state[t+1,] <- estim_state[t,] + k[t+1,] * (y[t] - estim_state[t,])
     
@@ -186,10 +202,14 @@ ll_pf_bootstrap <- function(par, ta0, y, r, num_of_particles = 1000) { #that als
     Wa[t+1,] <- dnorm(y[t+1], mean = estim_state[t,], sd = sqrt(s[t+1,] + Ta[t+1,] + sd_y^2)) * Wa[t,] # could have multiplied by W, but not necessary with uniform weights
     Wa[t+1,] <- Wa[t+1,]/sum(Wa[t+1,]) # normalize
     
+    # save mu for output
+    mu_out[t+1] <- sum(Wa[t+1,]*estim_state[t+1,])
+    
     # draw indices of particles with systematic resampling
     idx <- resample_systematic(Wa[t+1,])
     
     # implicitly W <- 1/num_of_particles
+    logTa[t+1,] <- logTa[t+1,idx]
     Ta[t+1,] <- Ta[t+1,idx]
     k[t+1,] <- k[t+1,idx]
     s[t+1,] <- s[t+1,idx]
@@ -198,31 +218,18 @@ ll_pf_bootstrap <- function(par, ta0, y, r, num_of_particles = 1000) { #that als
     # reset the weights
     Wa[t+1,] <- 1/num_of_particles
   }
-  
-  ## implement Kalman filter to give mu (predicted means)
-  estim_vol <- rowSums(sqrt(Ta)*Wa)
-  eta <- 0
-  pred <- 0
-  n <- length(y) - 1
-  
-  for (t in 1:n) {
-    eta[t+1] <- estim_vol[t+1]^2 / (estim_vol[t+1]^2 + sd_y)
-    pred[t+1] <- pred[t] + eta[t+1] * (y[t] - pred[t])
-  }
-  
-  mu <- pred
-  # return(pred)
-  
-  mse <- sum((pred-y)^2)/100
-  logLik <- -2*sum(dnorm(r, mean=mu, sd=sd_r, log=TRUE))	
-  return(mse)
+
+  logLik <- -2*sum(dnorm(r, mean=mu_out, sd=sd_r, log=TRUE))
+  return(logLik)
 }
 
 #serial optimisation
+set.seed(122334455)
+random_seeds <- sample(1:10000000,length(unique(long$id)))
 estimated_par <- list()
 for(i in unique(long$id)) {
   data <- subset(long, id==i)
-  estimated_par[[i]] <- optim(log(c(1,4,4)), fn = ll_pf_bootstrap, y = data$locations, r = data$prediction)
+  estimated_par[[i]] <- optim(c(log(sqrt(.4)),log(sqrt(1)),log(sqrt(.1))), fn = ll_pf_bootstrap, y = data$locations, r = data$prediction, random_seed = random_seeds[which(unique(long$id) == i)])
 }
 
 pars_btsrp_sd_ta_0 <- data.frame()
