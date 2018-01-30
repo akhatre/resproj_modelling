@@ -151,11 +151,11 @@ ll_pf_bootstrap <- function(par, ta0, y, r, num_of_particles = 1000) { #that als
   # set parametrers
   
   sd_y = exp(par[1]) #noise of observations, real one was 4
-  sd_r = exp(par[2]) #noise of participants' responses, unknown
+  sd_r = 1 #exp(par[2]) #noise of participants' responses, unknown
   if (ta0) {
     sd_ta = 0
   } else {
-    sd_ta = exp(par[3]) #sd of particle update distribution
+    sd_ta = exp(par[2]) #sd of particle update distribution
   }
   # Bootstrap filter
   # create matrices to store the particle values and weights
@@ -213,8 +213,9 @@ ll_pf_bootstrap <- function(par, ta0, y, r, num_of_particles = 1000) { #that als
   mu <- pred
   # return(pred)
   
+  mse <- sum((pred-y)^2)/100
   logLik <- -2*sum(dnorm(r, mean=mu, sd=sd_r, log=TRUE))	
-  return(logLik)
+  return(mse)
 }
 
 #serial optimisation
@@ -244,7 +245,7 @@ library(parallel)
 prl_optimisation_btsrt_var_ta <- function(i) {
   data <- subset(long, id==i)
   est_par <- as.character(unique(data$id))
-  est_par <- c(est_par, optim(log(c(4,4,1)), method = "SANN", fn = ll_pf_bootstrap, ta0 = FALSE, y = data$locations, r = data$prediction))
+  est_par <- c(est_par, optim(log(c(4,1)), method = "SANN", fn = ll_pf_bootstrap, ta0 = FALSE, y = data$locations, r = data$prediction))
   return(est_par)
 }
 prl_optimisation_btsrt_fixed_ta <- function(i) {
