@@ -3,16 +3,6 @@ set.seed(3)
 
 # Generating the data ----
 
-generate_data_volatiliy_linear_increase <- function(num_of_trials, noise, increase, start_state) {
-  data <- data.frame(Volatility = rep(4, num_of_trials), State = start_state, Observation = rnorm(1, mean = start_state, sd = noise))
-  for (t in 2:num_of_trials) {
-    data$Volatility[t] <- data$Volatility[t-1] + increase
-    data$State[t] <- data$State[t-1] + rnorm(1, mean = 0, sd = data$Volatility[t])
-    data$Observation[t] <- data$State[t] + rnorm(1, mean = 0, sd = noise)
-  }
-  return(data)
-}
-
 generate_data_volatiliy_sinusoid <- function(num_of_trials, noise, max, min, start_state) {
   data <- data.frame(Volatility = rep(4, num_of_trials), State = start_state, Observation = rnorm(1, mean = start_state, sd = noise))
   x <- seq(-0.5*pi, 2.5*pi, length.out = num_of_trials)
@@ -45,9 +35,22 @@ generate_data_volatiliy_block <- function(num_of_trials, noise, block1_vol, bloc
   return(data)
 }
 
+generate_data_fixed_vol <- function(num_of_trials, noise, vol, start_state) {
+  data <- data.frame(Volatility = rep(vol, num_of_trials), State = start_state, Observation = rnorm(1, mean = start_state, sd = noise))
+  for (t in 2:num_of_trials) {
+    
+    data$Volatility[t] <- vol
+    sd = data$Volatility[t]
+    data$State[t] <- data$State[t-1] + rnorm(1, mean = 0, sd = sd)
+    data$Observation[t] <- data$State[t] + rnorm(1, mean = 0, sd = noise)
+  }
+  return(data)
+}
+
 # data <- generate_data_volatiliy_linear_increase(num_of_trials = 100, noise = 4, increase = 0.3, start_state = 0)
 # data <- generate_data_volatiliy_sinusoid(num_of_trials = 100, noise = 4, max = 30, min = 3, start_state = 0)
-data <- generate_data_volatiliy_block(num_of_trials = 100, noise = 20, block1_vol = 5, block2_vol = 5, start_state = 0)
+data <- generate_data_volatiliy_block(num_of_trials = 100, noise = 4, block1_vol = 3, block2_vol = 30, start_state = 0)
+data <- generate_data_fixed_vol(100,2,0,0)
 
 plot(1:100, data$Observation+100, type = "l", ylab = "Share price", xlab = "Day (t)")
 
@@ -177,59 +180,36 @@ legend(c(0, max(data$Volatility)), lty = c(1,1,1), col = c("black", "red", "gree
 
 estim_vol <- est_vol_bootstrap #or straight
 
-participant_tracking_volatility <- function(estim_noise, estim_vol, observations) {
+klaman_filter <- function(estim_noise, estim_vol, observations) {
   eta <- 0
   pred <- 0
   n <- length(observations) - 1
   
   for (t in 1:n) {
-    eta[t+1] <- estim_vol[t+1]^2 / (estim_vol[t+1]^2 + estim_noise)
+    eta[t+1] <- estim_vol^2 / (estim_vol^2 + estim_noise)
     pred[t+1] <- pred[t] + eta[t+1] * (observations[t] - pred[t])
   }
   return(pred)
 }
 
-participant_ignoring_volatility <- function(estim_noise, learning_rate, observations) {
-  eta <- learning_rate
+plain_delta <- function(learning_rate, observations) {
   pred <- 0
   n <- length(observations) - 1
   for (t in 1:n) {
-    pred[t+1] <- pred[t] + eta * (observations[t] - pred[t])
+    pred[t+1] <- pred[t] + learning_rate * (observations[t] - pred[t])
   }
   return(pred)
 }
 
-# pred <- participant_tracking_volatility(estim_noise = 4, estim_vol = est_vol_bootstrap, observations = data$Observation)
-pred <- participant_ignoring_volatility(estim_noise = 4, learning_rate = 0.5, observations = data$Observation)
+
+pred <- klaman_filter(estim_noise = 2, estim_vol = 0, observations = data$Observation)
+pred <- plain_delta(learning_rate = 0.1, observations = data$Observation)
 
 par(mfrow=c(1,1))
-plot(data$Observation, type = "l", lty = 2)
-lines(data$State)
+plot(data$Observation, type = "l")
 lines(pred, col = "green")
 legend(c(0, max(data$Observation)), lty = c(2,1,1), col = c("black", "black", "green"), legend = c("Observations","States","Predictions"), bty="n")
 
 
-# Recovering model ----
-
-set.seed(1)
-data <- generate_data_volatiliy_block(num_of_trials = 100, noise = 4, block1_vol = 4, block2_vol = 16, start_state = 0)
-
-set.seed(2)
-est_vol_bootstrap <- pf_bootstrap(y = data$Observation, num_of_particles = 500)
-simulated_participant_response <- participant_tracking_volatility(estim_noise = 4, estim_vol = est_vol_bootstrap, observations = data$Observation)
-
-set.seed(3)
-est_vol_bootstrap <- pf_bootstrap(y = data$Observation, num_of_particles = 500)
-model_track_vol <- participant_tracking_volatility(estim_noise = 4, estim_vol = est_vol_bootstrap, observations = data$Observation)
-mse_track_vol_model <- sum((model_track_vol - simulated_participant_response)^2)/100
-
-mse_ignore_vol_model <- 0
-n <- 1
-for (i in seq(0, 1, 0.01)) {
-  pred_ignore_vol <- participant_ignoring_volatility(estim_noise = 4, learning_rate = i, observations = data$Observation)
-  mse_ignore_vol_model[n] <- sum((pred_ignore_vol - simulated_participant_response)^2)/100
-  n = n + 1
-}
-mse_ignore_vol_model <- min(mse_ignore_vol_model)
 
 
