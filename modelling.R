@@ -86,19 +86,23 @@ ratios_sinusoid <- ratios_sinusoid[,-c(asd,excluded_players$id[5:8])]
 y <- rowMeans(ratios_block)
 x <- 1:99
 lo <- loess(y ~ x)
-plot(x,y, type = "l", ylim = c(0,1), ylab = "Learning rate", xlab = "Trial", col = "gray")
+plot(x,y, ylim = c(-0.5,2), type = "l", ylab = "Learning rate", xlab = "Trial", col = "gray")
 lines(predict(lo), col = "red")
-abline(v=c(25,50,75), col="purple")
+# abline(v=c(25,50,75), col="black", lty = "dashed")
+lines(x,rep(1,99), lty="dashed", col = "cyan")
+lines(x,rep(0,99), lty="dashed", col = "cyan")
 lines(x, volatility_block[1:99]/35, col = "blue")
 
 
 y <- rowMeans(ratios_sinusoid)
 x <- 1:99
 lo <- loess(y ~ x)
-plot(x,y, type = "l", ylim = c(-5,5), ylab = "Learning rate", xlab = "Trial")
+plot(x,y, ylim = c(-5,5), type = "l", ylab = "Learning rate", xlab = "Trial", col = "gray")
 lines(predict(lo), col = "red")
-abline(v=c(25,50,75), col="purple")
-lines(x, volatility_sinusoid[1:99]/15)
+# abline(v=c(25,50,75), col="black", lty = "dashed")
+lines(x,rep(1,99), lty="dashed", col = "cyan")
+lines(x,rep(0,99), lty="dashed", col = "cyan")
+lines(x, volatility_sinusoid[1:99]/15, col = "blue")
 
 y <- rowMeans(data.frame(ratios_block,ratios_sinusoid))
 x <- 1:99
@@ -192,7 +196,10 @@ model_for_grad_vol <- lmer(update ~ error * volatility + (error|id), data = long
 #estimating learning rate from the model
 long$set_as_number[long$set == "block"] <- -1
 long$set_as_number[long$set == "sinusoid"] <- 1
-long$eta <- 0.735  + 0.006 * long$volatility - 0.081 * long$set_as_number + 0.004 * long$set_as_number * long$volatility
+long$eta <- 0.827  + 0.004 * long$volatility - 0.056 * long$set_as_number + 0.003 * long$set_as_number * long$volatility
+
+plot(1:100, long$eta[long$id == unique(long$id)[1]], type = "l", ylim=c(0.7,1), col = "blue", ylab = "Learning rate", xlab = "Trial")
+lines(1:100, long$eta[long$id == unique(long$id)[60]], col = "red")
 
 ids <- unique(long$id)
 etas <- data.frame(long$eta[long$id == ids[1]])
@@ -204,7 +211,7 @@ for (n in 2:length(ids)) {
 etas <- rowSums(etas)/length(names(etas))
 plot(1:100, etas, type = "l")
 
-#fitting bootstrap filter ----
+#models ----
 resample_systematic <- function(weights) {
   # input: weights is a vector of length N with (unnormalized) importance weights
   # output: a vector of length N with indices of the replicated particles
@@ -321,9 +328,9 @@ pure_kalman_filter <- function(par, y, r, random_seed=12345) {
   n = length(y)
   
   # set parameters
-  sd_y <- exp(par[1]) #noise of observations, real one was 4
-  sd_r <- exp(par[2]) #noise of participants' responses, unknown
-  sd_vol <- exp(par[3])
+  sd_y <- par[1] #noise of observations, real one was 4
+  sd_r <- par[2] #noise of participants' responses, unknown
+  sd_vol <- par[3]
   
   estim_state <- 50
   k <- 0
@@ -343,7 +350,7 @@ delta_rule <- function(par, y, r, random_seed=12345) {
   
   # set parameters
   k <- par[1] #noise of observations, real one was 4
-  sd_r <- exp(par[2])
+  sd_r <- par[2]
   
   estim_state <- 50
   
@@ -355,34 +362,17 @@ delta_rule <- function(par, y, r, random_seed=12345) {
   return(logLik)
 }
 
-heuristic_model <- function(par, y, r, random_seed=12345) {
+lme_model <- function(par, y, r, eta, random_seed=12345) {
   set.seed(random_seed)
   n = length(y)
   
   # set parameters
-  a <- round(par[1])
-  sd_r <- exp(par[2])
+  sd_r <- par[1] #noise of observations, real one was 4
   
   estim_state <- 50
-  k <- c(1,1)
   
-  e <- y[1] - estim_state[1]
-  estim_state[2] <- estim_state[1] + k[2] * e[1]
-  
-  sigmoid_k <- 1/(1+exp(10:-10))
-  
-  for (t in 2:(n-1)) {
-    e[t] <- y[t] - estim_state[t]
-    
-    if (abs(e[t]) < abs(e[t-1])) {
-      if(a >= 1 && a < 21){a <- a + 1}
-      k[t+1] <- sigmoid_k[a]
-    } else {
-      if(a > 1 && a <= 21){a <- a - 1}
-      k[t+1] <- sigmoid_k[a]
-    }
-    
-    estim_state[t+1] <- estim_state[t] + k[t+1] * e[t]
+  for (t in 1:(n-1)) {
+    estim_state[t+1] <- estim_state[t] + eta[t] * (y[t] - estim_state[t])
   }
   
   logLik <- -2*sum(dnorm(r, mean=estim_state, sd=sd_r, log=TRUE))
@@ -442,10 +432,10 @@ prl_optimisation_delta <- function(i) {
   est_par <- c(est_par, optim(c(0.5,log(sqrt(1))), fn = delta_rule, y = data$locations, r = data$prediction, random_seed = random_seeds[which(unique(long$id) == i)]))
   return(est_par)
 }
-prl_optimisation_heuristic <- function(i) {
+prl_optimisation_lme <- function(i) {
   data <- subset(long, id==i)
   est_par <- as.character(unique(data$id))
-  est_par <- c(est_par, optim(c(11,log(sqrt(1))), fn = heuristic_model, y = data$locations, r = data$prediction, random_seed = random_seeds[which(unique(long$id) == i)]))
+  est_par <- c(est_par, optim(c(1), fn = lme_model, y = data$locations, r = data$prediction, eta = data$eta, random_seed = random_seeds[which(unique(long$id) == i)]))
   return(est_par)
 }
 
@@ -502,55 +492,96 @@ for (i in 1:length(optim_res_btstrp_var_ta)) {
   params_heuristic$id[i] <- optim_res_heuristic[[i]][[1]]
 }
 
+#evolutionary optimisation ----
+deoptim_res_btstrp_var_ta <- deoptim_res_btstrp_fixed_ta <- list()
+ids <- unique(long$id)
+for (i in ids[11:96]) {
+  data <- subset(long, id == i)
+  deoptim_res_btstrp_var_ta[[i]] <- DEoptim(fn = ll_pf_bootstrap, lower = c(0, 0, 0, log(0.001), 0), upper = c(10, 10, 10, 5, 30), y = data$locations, r = data$prediction, random_seed = random_seeds[which(unique(long$id) == i)], control = DEoptim.control(cluster = cluster))
+  deoptim_res_btstrp_fixed_ta[[i]] <- DEoptim(fn = ll_pf_bootstrap, lower = c(0, 0, 0, log(0.001)), upper = c(10, 10, 10, 5), y = data$locations, r = data$prediction, ta0 = TRUE, random_seed = random_seeds[which(unique(long$id) == i)], control = DEoptim.control(cluster = cluster))
+}
 
-# models <- data.frame(model = c("params_btstrp_var_ta", "params_btstrp_fixed_ta", "params_kalman", "params_delta", "params_heuristic"))
-models <- data.frame(model = rep(0,4))
-# for (i in length(models$model)) {
-#   model_params <- get(models$model[i])
-#   models$dAIC[i] <- sum(params_delta$AIC - model_params$AIC)/96
-#   models$nAIC[i] <- table(model_params$AIC < get(models$model[abs(i+1)])$AIC & model_params$AIC < params_kalman$AIC & model_params$AIC < params_delta$AIC)["TRUE"]
-# }
-models$model[1] <- "pf_btstrp_var_sd_ta"
-models$dAIC[1] <- mean(params_delta$AIC - params_btstrp_var_ta$AIC) 
-models$dAIC_sd[1] <- sd(params_delta$AIC - params_btstrp_var_ta$AIC)
-models$nAIC[1] <- table(params_btstrp_var_ta$AIC < params_btstrp_fixed_ta$AIC & params_btstrp_var_ta$AIC < params_kalman$AIC & params_btstrp_var_ta$AIC < params_delta$AIC)["TRUE"]
-models$dBIC[1] <- mean(params_delta$BIC - params_btstrp_var_ta$BIC)
-models$dBIC_sd[1] <- sd(params_delta$BIC - params_btstrp_var_ta$BIC)
-models$nBIC[1] <- table(params_btstrp_var_ta$BIC < params_btstrp_fixed_ta$BIC & params_btstrp_var_ta$BIC < params_kalman$BIC & params_btstrp_var_ta$BIC < params_delta$BIC)["TRUE"]
-models$dDeviance[1] <- sum(params_delta$Deviance - params_btstrp_var_ta$Deviance)/96
-models$nDeviance[1] <- table(params_btstrp_var_ta$Deviance < params_btstrp_fixed_ta$Deviance & params_btstrp_var_ta$Deviance < params_kalman$Deviance & params_btstrp_var_ta$Deviance < params_delta$Deviance)["TRUE"]
-models$model[2] <- "pf_btstrp_0_sd_ta"
-models$dAIC[2] <- mean(params_delta$AIC - params_btstrp_fixed_ta$AIC)
-models$dAIC_sd[2] <- sd(params_delta$AIC - params_btstrp_fixed_ta$AIC)
-models$nAIC[2] <- table(params_btstrp_fixed_ta$AIC < params_btstrp_var_ta$AIC & params_btstrp_fixed_ta$AIC < params_kalman$AIC & params_btstrp_fixed_ta$AIC < params_delta$AIC)["TRUE"]
-models$dBIC[2] <- mean(params_delta$BIC - params_btstrp_fixed_ta$BIC)
-models$dBIC_sd[2] <- sd(params_delta$BIC - params_btstrp_fixed_ta$BIC)
-models$nBIC[2] <- table(params_btstrp_fixed_ta$BIC < params_btstrp_var_ta$BIC & params_btstrp_fixed_ta$BIC < params_kalman$BIC & params_btstrp_fixed_ta$BIC < params_delta$BIC)["TRUE"]
-models$dDeviance[2] <- sum(params_delta$Deviance - params_btstrp_fixed_ta$Deviance)/96
-models$nDeviance[2] <- table(params_btstrp_fixed_ta$Deviance < params_btstrp_var_ta$Deviance & params_btstrp_fixed_ta$Deviance < params_kalman$Deviance & params_btstrp_fixed_ta$Deviance < params_delta$Deviance)["TRUE"]
-models$model[3] <- "pure_kalman_filter"
-models$dAIC[3] <- mean(params_delta$AIC - params_kalman$AIC)
-models$dAIC_sd[3] <- sd(params_delta$AIC - params_kalman$AIC)
-models$nAIC[3] <- table(params_kalman$AIC < params_btstrp_fixed_ta$AIC & params_kalman$AIC < params_btstrp_var_ta$AIC & params_kalman$AIC < params_delta$AIC)["TRUE"]
-models$dBIC[3] <- mean(params_delta$BIC - params_kalman$BIC)
-models$dBIC_sd[3] <- sd(params_delta$BIC - params_kalman$BIC)
-models$nBIC[3] <- table(params_kalman$BIC < params_btstrp_fixed_ta$BIC & params_kalman$BIC < params_btstrp_var_ta$BIC & params_kalman$BIC < params_delta$BIC)["TRUE"]
-models$dDeviance[3] <- sum(params_delta$Deviance - params_kalman$Deviance)/96
-models$nDeviance[3] <- table(params_kalman$Deviance < params_btstrp_fixed_ta$Deviance & params_kalman$Deviance < params_btstrp_var_ta$Deviance & params_kalman$Deviance < params_delta$Deviance)["TRUE"]
-models$model[4] <- "delta_rule"
-models$dAIC[4] <- 0
-models$nAIC[4] <- table(params_delta$AIC < params_btstrp_fixed_ta$AIC & params_delta$AIC < params_btstrp_var_ta$AIC & params_delta$AIC < params_kalman$AIC)["TRUE"]
-models$dBIC[4] <- 0
-models$nBIC[4] <- table(params_delta$BIC < params_btstrp_fixed_ta$BIC & params_delta$BIC < params_btstrp_var_ta$BIC & params_delta$BIC < params_kalman$BIC)["TRUE"]
-models$dDeviance[4] <- 0
-models$nDeviance[4] <- table(params_delta$Deviance < params_btstrp_fixed_ta$Deviance & params_delta$Deviance < params_btstrp_var_ta$Deviance & params_delta$Deviance < params_kalman$Deviance)["TRUE"]
-models$model[5] <- "heuristic model"
-models$dAIC[5] <- sum(params_delta$AIC - params_heuristic$AIC)/96
-models$nAIC[5] <- 000#table(params_delta$AIC < params_btstrp_fixed_ta$AIC & params_delta$AIC < params_btstrp_var_ta$AIC & params_delta$AIC < params_kalman$AIC)["TRUE"]
-models$dBIC[5] <- sum(params_delta$BIC - params_heuristic$BIC)/96
-models$nBIC[5] <- 000#table(params_delta$BIC < params_btstrp_fixed_ta$BIC & params_delta$BIC < params_btstrp_var_ta$BIC & params_delta$BIC < params_kalman$BIC)["TRUE"]
-models$dDeviance[5] <- sum(params_delta$Deviance - params_heuristic$Deviance)/96
-models$nDeviance[5] <- 000#table(params_delta$Deviance < params_btstrp_fixed_ta$Deviance & params_delta$Deviance < params_btstrp_var_ta$Deviance & params_delta$Deviance < params_kalman$Deviance)["TRUE"]
+deoptim_res_delta <- list()
+for (i in ids) {
+  data <- subset(long, id == i)
+  deoptim_res_delta[[i]] <- DEoptim(fn = delta_rule, lower = c(0, 0), upper = c(10, 10), y = data$locations, r = data$prediction, random_seed = random_seeds[which(unique(long$id) == i)], control = DEoptim.control(cluster = cluster))
+}
+
+deoptim_res_lme <- list()
+for (i in ids) {
+  data <- subset(long, id == i)
+  deoptim_res_lme[[i]] <- DEoptim(fn = lme_model, lower = c(0), upper = c(10), y = data$locations, r = data$prediction, eta = data$eta, random_seed = random_seeds[which(unique(long$id) == i)], control = DEoptim.control(cluster = cluster))
+}
+
+deoptim_res_kalman <- list()
+for (i in ids) {
+  data <- subset(long, id == i)
+  deoptim_res_kalman[[i]] <- DEoptim(fn = pure_kalman_filter, lower = c(0,0,0), upper = c(10,10,40), y = data$locations, r = data$prediction, random_seed = random_seeds[which(unique(long$id) == i)], control = DEoptim.control(cluster = cluster))
+}
+
+params_btstrp_fixed_ta <- params_btstrp_var_ta <- data.frame(id = ids)
+for(i in ids) {
+  params_btstrp_var_ta$Deviance[which(params_btstrp_var_ta$id == i)] <- deoptim_res_btstrp_var_ta[[i]]$optim$bestval
+  params_btstrp_var_ta$AIC[which(params_btstrp_var_ta$id == i)] <- deoptim_res_btstrp_var_ta[[i]]$optim$bestval + 2*5
+  params_btstrp_var_ta$BIC[which(params_btstrp_var_ta$id == i)] <- deoptim_res_btstrp_var_ta[[i]]$optim$bestval +log(100)*5
+  params_btstrp_var_ta$sd_y[which(params_btstrp_var_ta$id == i)] <- deoptim_res_btstrp_var_ta[[i]]$optim$bestmem[[1]]
+  params_btstrp_var_ta$sd_r[which(params_btstrp_var_ta$id == i)] <- deoptim_res_btstrp_var_ta[[i]]$optim$bestmem[[2]]
+  params_btstrp_var_ta$log_sd_ta[which(params_btstrp_var_ta$id == i)] <- deoptim_res_btstrp_var_ta[[i]]$optim$bestmem[[3]]
+  params_btstrp_var_ta$log_mean_ta[which(params_btstrp_var_ta$id == i)] <- deoptim_res_btstrp_var_ta[[i]]$optim$bestmem[[4]]
+  params_btstrp_var_ta$sd_ta[which(params_btstrp_var_ta$id == i)] <- deoptim_res_btstrp_var_ta[[i]]$optim$bestmem[[5]]
+  
+  params_btstrp_fixed_ta$Deviance[which(params_btstrp_var_ta$id == i)] <- deoptim_res_btstrp_fixed_ta[[i]]$optim$bestval
+  params_btstrp_fixed_ta$AIC[which(params_btstrp_var_ta$id == i)] <- deoptim_res_btstrp_fixed_ta[[i]]$optim$bestval + 2*4
+  params_btstrp_fixed_ta$BIC[which(params_btstrp_var_ta$id == i)] <- deoptim_res_btstrp_fixed_ta[[i]]$optim$bestval +log(100)*4
+  params_btstrp_fixed_ta$sd_y[which(params_btstrp_var_ta$id == i)] <- deoptim_res_btstrp_fixed_ta[[i]]$optim$bestmem[[1]]
+  params_btstrp_fixed_ta$sd_r[which(params_btstrp_var_ta$id == i)] <- deoptim_res_btstrp_fixed_ta[[i]]$optim$bestmem[[2]]
+  params_btstrp_fixed_ta$log_sd_ta[which(params_btstrp_var_ta$id == i)] <- deoptim_res_btstrp_fixed_ta[[i]]$optim$bestmem[[3]]
+  params_btstrp_fixed_ta$log_mean_ta[which(params_btstrp_var_ta$id == i)] <- deoptim_res_btstrp_fixed_ta[[i]]$optim$bestmem[[4]]
+}
+
+params_delta <- params_lme <- data.frame(id = ids)
+for(i in ids) {
+  params_delta$Deviance[which(params_delta$id == i)] <- deoptim_res_delta[[i]]$optim$bestval
+  params_delta$AIC[which(params_delta$id == i)] <- deoptim_res_delta[[i]]$optim$bestval + 2*2
+  params_delta$BIC[which(params_delta$id == i)] <- deoptim_res_delta[[i]]$optim$bestval +log(100)*2
+  params_delta$k[which(params_delta$id == i)] <- deoptim_res_delta[[i]]$optim$bestmem[[1]]
+  params_delta$sd_r[which(params_delta$id == i)] <- deoptim_res_delta[[i]]$optim$bestmem[[2]]
+  
+  params_lme$Deviance[which(params_lme$id == i)] <- deoptim_res_lme[[i]]$optim$bestval
+  params_lme$AIC[which(params_lme$id == i)] <- deoptim_res_lme[[i]]$optim$bestval + 2
+  params_lme$BIC[which(params_lme$id == i)] <- deoptim_res_lme[[i]]$optim$bestval + log(100)
+  params_lme$sd_r[which(params_lme$id == i)] <- deoptim_res_lme[[i]]$optim$bestmem[[1]]
+}
+
+params_kalman <- data.frame(id = ids)
+for(i in ids) {
+  params_kalman$Deviance[which(params_kalman$id == i)] <- deoptim_res_kalman[[i]]$optim$bestval
+  params_kalman$AIC[which(params_kalman$id == i)] <- deoptim_res_kalman[[i]]$optim$bestval + 2*3
+  params_kalman$BIC[which(params_kalman$id == i)] <- deoptim_res_kalman[[i]]$optim$bestval + log(100)*3
+  params_kalman$sd_y[which(params_kalman$id == i)] <- deoptim_res_kalman[[i]]$optim$bestmem[[1]]
+  params_kalman$sd_r[which(params_kalman$id == i)] <- deoptim_res_kalman[[i]]$optim$bestmem[[2]]
+  params_kalman$sd_vol[which(params_kalman$id == i)] <- deoptim_res_kalman[[i]]$optim$bestmem[[3]]
+}
+
+#comparing models ----
+models <- data.frame(model = c("params_btstrp_var_ta", "params_btstrp_fixed_ta", "params_kalman", "params_delta", "params_lme"))
+for (model in models$model) {
+  model_params <- get(model)
+  other_models <- as.character(models$model[models$model!=model])
+  row_index <- which(models$model == model)
+  
+  models$dAIC_mean[row_index] <- mean(params_delta$AIC - model_params$AIC)
+  models$dAIC_sd[row_index] <- sd(params_delta$AIC - model_params$AIC)
+  models$nAIC[row_index] <- table(model_params$AIC < get(other_models[1])$AIC & model_params$AIC < get(other_models[2])$AIC & model_params$AIC < get(other_models[3])$AIC & model_params$AIC < get(other_models[4])$AIC)["TRUE"]
+ 
+  models$dBIC_mean[row_index] <- mean(params_delta$BIC - model_params$BIC)
+  models$dBIC_sd[row_index] <- sd(params_delta$BIC - model_params$BIC)
+  models$nBIC[row_index] <- table(model_params$BIC < get(other_models[1])$BIC & model_params$BIC < get(other_models[2])$BIC & model_params$BIC < get(other_models[3])$BIC & model_params$BIC < get(other_models[4])$BIC)["TRUE"]
+  
+  models$dDeviance_mean[row_index] <- mean(params_delta$Deviance - model_params$Deviance)
+  models$dDeviance_sd[row_index] <- sd(params_delta$Deviance - model_params$Deviance)
+  models$nDeviance[row_index] <- table(model_params$Deviance < get(other_models[1])$Deviance & model_params$Deviance < get(other_models[2])$Deviance & model_params$Deviance < get(other_models[3])$Deviance & model_params$Deviance < get(other_models[4])$Deviance)["TRUE"]
+}
 
 
 block_ids <- params_btstrp_var_ta$id %in% unique(long$id[long$set == "block"])
@@ -625,49 +656,8 @@ ll_pf_for_all <- function(par) {
   return(sum(deviance))
 }
 
-sann_for_all_params <- optim(c(log(sqrt(4)), log(sqrt(1)), log(sqrt(10)), 10, log(sqrt(10))), fn = sann_for_all)
-c(exp(-0.08702506),  exp(1.91363935),  exp(2.13005031),  9.90979626, exp(-0.45176395))
-nelder_mead_for_all_params <- c(-0.08702506,  1.91363935,  2.13005031,  9.90979626, -0.45176395)
-ll_pf_bootstrap(par = nelder_mead_for_all_params, y = test_y, r = test_r)
 
 
-#genetic algortithm
-deoptim_res_btstrp_var_ta <- deoptim_res_btstrp_fixed_ta <- list()
-ids <- unique(long$id)
-for (i in ids[11:96]) {
-  data <- subset(long, id == i)
-  deoptim_res_btstrp_var_ta[[i]] <- DEoptim(fn = ll_pf_bootstrap, lower = c(0, 0, 0, log(0.001), 0), upper = c(10, 10, 10, 5, 30), y = data$locations, r = data$prediction, random_seed = random_seeds[which(unique(long$id) == i)], control = DEoptim.control(cluster = cluster))
-  deoptim_res_btstrp_fixed_ta[[i]] <- DEoptim(fn = ll_pf_bootstrap, lower = c(0, 0, 0, log(0.001)), upper = c(10, 10, 10, 5), y = data$locations, r = data$prediction, ta0 = TRUE, random_seed = random_seeds[which(unique(long$id) == i)], control = DEoptim.control(cluster = cluster))
-}
-
-params_btstrp_fixed_ta <- params_btstrp_var_ta <- data.frame(id = ids)
-for(i in ids) {
-  params_btstrp_var_ta$Deviance[which(params_btstrp_var_ta$id == i)] <- deoptim_res_btstrp_var_ta[[i]]$optim$bestval
-  params_btstrp_var_ta$AIC[which(params_btstrp_var_ta$id == i)] <- deoptim_res_btstrp_var_ta[[i]]$optim$bestval + 2*5
-  params_btstrp_var_ta$BIC[which(params_btstrp_var_ta$id == i)] <- deoptim_res_btstrp_var_ta[[i]]$optim$bestval +log(100)*5
-  params_btstrp_var_ta$sd_y[which(params_btstrp_var_ta$id == i)] <- deoptim_res_btstrp_var_ta[[i]]$optim$bestmem[[1]]
-  params_btstrp_var_ta$sd_r[which(params_btstrp_var_ta$id == i)] <- deoptim_res_btstrp_var_ta[[i]]$optim$bestmem[[2]]
-  params_btstrp_var_ta$log_sd_ta[which(params_btstrp_var_ta$id == i)] <- deoptim_res_btstrp_var_ta[[i]]$optim$bestmem[[3]]
-  params_btstrp_var_ta$log_mean_ta[which(params_btstrp_var_ta$id == i)] <- deoptim_res_btstrp_var_ta[[i]]$optim$bestmem[[4]]
-  params_btstrp_var_ta$sd_ta[which(params_btstrp_var_ta$id == i)] <- deoptim_res_btstrp_var_ta[[i]]$optim$bestmem[[5]]
-  
-  params_btstrp_fixed_ta$Deviance[which(params_btstrp_var_ta$id == i)] <- deoptim_res_btstrp_fixed_ta[[i]]$optim$bestval
-  params_btstrp_fixed_ta$AIC[which(params_btstrp_var_ta$id == i)] <- deoptim_res_btstrp_fixed_ta[[i]]$optim$bestval + 2*4
-  params_btstrp_fixed_ta$BIC[which(params_btstrp_var_ta$id == i)] <- deoptim_res_btstrp_fixed_ta[[i]]$optim$bestval +log(100)*4
-  params_btstrp_fixed_ta$sd_y[which(params_btstrp_var_ta$id == i)] <- deoptim_res_btstrp_fixed_ta[[i]]$optim$bestmem[[1]]
-  params_btstrp_fixed_ta$sd_r[which(params_btstrp_var_ta$id == i)] <- deoptim_res_btstrp_fixed_ta[[i]]$optim$bestmem[[2]]
-  params_btstrp_fixed_ta$log_sd_ta[which(params_btstrp_var_ta$id == i)] <- deoptim_res_btstrp_fixed_ta[[i]]$optim$bestmem[[3]]
-  params_btstrp_fixed_ta$log_mean_ta[which(params_btstrp_var_ta$id == i)] <- deoptim_res_btstrp_fixed_ta[[i]]$optim$bestmem[[4]]
-  
-  # deoptim_deviances_full$DevianceFixdTa[which(deoptim_deviances_full$id == i)] <- deoptim_res_btstrp_fixed_ta[[i]]$optim$bestval
-  # deoptim_deviances_full$DevianceKalmanOptim[which(deoptim_deviances_full$id == i)] <- params_kalman[which(params_kalman$id == i),]$Deviance
-  # deoptim_deviances_full$DevianceDeltaOptim[which(deoptim_deviances_full$id == i)] <- params_delta[which(params_delta$id == i),]$Deviance
-  # deoptim_deviances$sd_y[which(deoptim_deviances$id == i)] <- deoptim_res_btstrp_var_ta[[i]]$optim$bestmem[[1]]
-  # deoptim_deviances$sd_r[which(deoptim_deviances$id == i)] <- deoptim_res_btstrp_var_ta[[i]]$optim$bestmem[[2]]
-  # deoptim_deviances$log_sd_ta[which(deoptim_deviances$id == i)] <- deoptim_res_btstrp_var_ta[[i]]$optim$bestmem[[3]]
-  # deoptim_deviances$log_mean_ta[which(deoptim_deviances$id == i)] <- deoptim_res_btstrp_var_ta[[i]]$optim$bestmem[[4]]
-  # deoptim_deviances$sd_ta[which(deoptim_deviances$id == i)] <- deoptim_res_btstrp_var_ta[[i]]$optim$bestmem[[5]]
-}
 
 # watching learning rate ----
 subject_pf_bootstrap <- function(par, ta0 = FALSE, y, num_of_particles = 1000, random_seed=12345) { #that also should take y, r, and num_of_pacticles as input variables. Though, num_of_particles is not to be optimsed at the moment.
@@ -809,13 +799,19 @@ colors = colors()[sample(1:length(colors()), length(ids), replace=FALSE)]
 for (i in ids) {
   data <- subset(long, id == i)
   par <- as.numeric(params_btstrp_var_ta[which(params_btstrp_var_ta$id == i), c(FALSE,FALSE,FALSE,FALSE,TRUE,TRUE,TRUE,TRUE,TRUE)])
-  results <- subject_pf_bootstrap(par, y = data$locations)
+  results <- subject_pf_bootstrap(par, y = data$locations, random_seed = random_seeds[which(unique(long$id) == i)])
   if (i == ids[1]) {
-    plot(1:100, results$k, type = "l", col = colors[which(ids == i)])
+    # plot(1:100, results$k, type = "l", col = colors[which(ids == i)])
+    pf_var_ta_etas <<- data.frame(results$k)
   } else {
-    lines(1:100, results$k, col = colors[which(ids == i)])
+    # lines(1:100, results$k, col = colors[which(ids == i)])
+    pf_var_ta_etas <<- data.frame(pf_var_ta_etas, data.frame(results$k))
   }
 }
+plot(1:100, rowMeans(pf_var_ta_etas), type = "l", col = "red", ylim=c(0,1))
+lines(1:100, rowMeans(pf_var_ta_etas)+rowSds(as.matrix(pf_var_ta_etas)), type = "l")
+lines(1:100, rowMeans(pf_var_ta_etas)-rowSds(as.matrix(pf_var_ta_etas)), type = "l")
+
 for (i in ids) {
   data <- subset(long, id == i)
   par <- as.numeric(params_btstrp_fixed_ta[which(params_btstrp_fixed_ta$id == i), c(FALSE,FALSE,FALSE,FALSE,TRUE,TRUE,TRUE,TRUE)])
