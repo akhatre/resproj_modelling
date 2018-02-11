@@ -564,7 +564,7 @@ for(i in ids) {
 }
 
 #comparing models ----
-models <- data.frame(model = c("params_btstrp_var_ta", "params_btstrp_fixed_ta", "params_kalman", "params_delta", "params_lme"))
+models <- data.frame(model = c("params_btstrp_var_ta", "params_btstrp_fixed_ta", "params_kalman", "params_delta"))
 for (model in models$model) {
   model_params <- get(model)
   other_models <- as.character(models$model[models$model!=model])
@@ -572,17 +572,20 @@ for (model in models$model) {
   
   models$dAIC_mean[row_index] <- mean(params_delta$AIC - model_params$AIC)
   models$dAIC_sd[row_index] <- sd(params_delta$AIC - model_params$AIC)
-  models$nAIC[row_index] <- table(model_params$AIC < get(other_models[1])$AIC & model_params$AIC < get(other_models[2])$AIC & model_params$AIC < get(other_models[3])$AIC & model_params$AIC < get(other_models[4])$AIC)["TRUE"]
+  models$nAIC[row_index] <- table(model_params$AIC < get(other_models[1])$AIC & model_params$AIC < get(other_models[2])$AIC & model_params$AIC < get(other_models[3])$AIC)["TRUE"]
  
   models$dBIC_mean[row_index] <- mean(params_delta$BIC - model_params$BIC)
   models$dBIC_sd[row_index] <- sd(params_delta$BIC - model_params$BIC)
-  models$nBIC[row_index] <- table(model_params$BIC < get(other_models[1])$BIC & model_params$BIC < get(other_models[2])$BIC & model_params$BIC < get(other_models[3])$BIC & model_params$BIC < get(other_models[4])$BIC)["TRUE"]
+  models$nBIC[row_index] <- table(model_params$BIC < get(other_models[1])$BIC & model_params$BIC < get(other_models[2])$BIC & model_params$BIC < get(other_models[3])$BIC)["TRUE"]
   
   models$dDeviance_mean[row_index] <- mean(params_delta$Deviance - model_params$Deviance)
   models$dDeviance_sd[row_index] <- sd(params_delta$Deviance - model_params$Deviance)
-  models$nDeviance[row_index] <- table(model_params$Deviance < get(other_models[1])$Deviance & model_params$Deviance < get(other_models[2])$Deviance & model_params$Deviance < get(other_models[3])$Deviance & model_params$Deviance < get(other_models[4])$Deviance)["TRUE"]
+  models$nDeviance[row_index] <- table(model_params$Deviance < get(other_models[1])$Deviance & model_params$Deviance < get(other_models[2])$Deviance & model_params$Deviance < get(other_models[3])$Deviance)["TRUE"]
 }
 
+optimal_people <- params_btstrp_var_ta$Deviance < params_delta$Deviance & params_btstrp_var_ta$Deviance < params_btstrp_fixed_ta$Deviance & params_btstrp_var_ta$Deviance < params_kalman$Deviance
+optimal_people <- params_btstrp_var_ta$id[optimal_people]
+table(long$set[long$id %in% optimal_people])
 
 block_ids <- params_btstrp_var_ta$id %in% unique(long$id[long$set == "block"])
 param <- "Deviance"
@@ -623,19 +626,8 @@ plot_params <- function(param_name, sort = FALSE, model_names, ylim = FALSE, xli
 models_names <- c("params_btstrp_var_ta", "params_btstrp_fixed_ta", "params_kalman", "params_delta")
 plot_params("AIC", model_names = models_names, sort = TRUE)
 
-?plot(1:96, get_params, col = points)
-
-points1[-block_ids] <- "green"
-points1[block_ids] <- "magenta"
-points(1:96, sort(params_btstrp_fixed_ta[[param]]), col = points1)
-
-points2[-block_ids] <- "cyan"
-points2[block_ids] <- "brown"
-points(1:96, sort(params_kalman[[param]]), col = points2)
-
-points3[-block_ids] <- "grey"
-points3[block_ids] <- "orange"
-points(1:96, sort(params_delta[[param]]), col = points3)
+boxplot(params_btstrp_var_ta$AIC,params_btstrp_fixed_ta$AIC,params_kalman$AIC,params_lme$AIC, params_delta$AIC,names=c("PF_TV", "PF_NTV", "KLMN", "LME", "DLT"), ylab = "AIC")
+boxplot(params_btstrp_var_ta$BIC,params_btstrp_fixed_ta$BIC,params_kalman$BIC,params_lme$BIC, params_delta$BIC,names=c("PF_TV", "PF_NTV", "KLMN", "LME", "DLT"), ylab = "BIC")
 
 #debugging
 test_id <- "05lfqZKIxbPaV1kS9Go8wXzeqVI2"
@@ -796,51 +788,70 @@ subject_heuristic_model <- function(par, y, random_seed=12345) {
 
 colors = colors()[sample(1:length(colors()), length(ids), replace=FALSE)]
 
+ids <- unique(long$id[long$set == "block"])
 for (i in ids) {
   data <- subset(long, id == i)
   par <- as.numeric(params_btstrp_var_ta[which(params_btstrp_var_ta$id == i), c(FALSE,FALSE,FALSE,FALSE,TRUE,TRUE,TRUE,TRUE,TRUE)])
   results <- subject_pf_bootstrap(par, y = data$locations, random_seed = random_seeds[which(unique(long$id) == i)])
   if (i == ids[1]) {
-    # plot(1:100, results$k, type = "l", col = colors[which(ids == i)])
+    plot(1:100, results$k, type = "l", col = colors[which(ids == i)])
     pf_var_ta_etas <<- data.frame(results$k)
   } else {
-    # lines(1:100, results$k, col = colors[which(ids == i)])
+    lines(1:100, results$k, col = colors[which(ids == i)])
     pf_var_ta_etas <<- data.frame(pf_var_ta_etas, data.frame(results$k))
   }
 }
-plot(1:100, rowMeans(pf_var_ta_etas), type = "l", col = "red", ylim=c(0,1))
-lines(1:100, rowMeans(pf_var_ta_etas)+rowSds(as.matrix(pf_var_ta_etas)), type = "l")
-lines(1:100, rowMeans(pf_var_ta_etas)-rowSds(as.matrix(pf_var_ta_etas)), type = "l")
+
+lower_quant <- upper_quant <- list()
+for(i in 1:100){upper_quant[i] <- as.numeric(quantile(as.numeric(pf_var_ta_etas[i,]))[4]); lower_quant[i] <- as.numeric(quantile(as.numeric(pf_var_ta_etas[i,]))[2])}
+plot(1:100, rowMeans(pf_var_ta_etas), type = "l", col = "red", ylim=c(0,1), ylab = "Learning rate", xlab = "Trial")
+polygon(1:101, c(0, upper_quant[2:100], 0), col="lightblue3", border = NA)
+polygon(1:102, c(0, lower_quant[2:100],0.9, 0), col="white", border = NA)
+lines(1:100, rowMeans(pf_var_ta_etas), col = "lightblue1", ylim=c(0,1), lwd = 3)
 
 for (i in ids) {
   data <- subset(long, id == i)
   par <- as.numeric(params_btstrp_fixed_ta[which(params_btstrp_fixed_ta$id == i), c(FALSE,FALSE,FALSE,FALSE,TRUE,TRUE,TRUE,TRUE)])
   results <- subject_pf_bootstrap(par, y = data$locations, ta0 = TRUE)
   if (i == ids[1]) {
-    plot(1:100, results$k, type = "l", col = colors[which(ids == i)])
+    # plot(1:100, results$k, type = "l", col = colors[which(ids == i)])
+
   } else {
-    lines(1:100, results$k, col = colors[which(ids == i)])
-  }
-}
-for (i in ids) {
-  data <- subset(long, id == i)
-  par <- as.numeric(params_kalman[which(params_kalman$id == i), c(FALSE,FALSE,FALSE,TRUE,TRUE,TRUE,FALSE)])
-  results <- subject_kalman_filter(par, y = data$locations)
-  if (i == ids[1]) {
-    plot(1:100, results$k, type = "l", col = colors[which(ids == i)])
-  } else {
-    lines(1:100, results$k, col = colors[which(ids == i)])
-  }
-}
-for (i in ids[1:5]) {
-  data <- subset(long, id == i)
-  par <- as.numeric(params_heuristic[which(params_heuristic$id == i), c(FALSE,FALSE,FALSE,TRUE,TRUE,FALSE)])
-  results <- subject_heuristic_model(par, y = data$locations)
-  if (i == ids[1]) {
-    plot(1:100, results$k, type = "l", col = colors[which(ids == i)], ylim = c(0,1))
-  } else {
-    lines(1:100, results$k, col = colors[which(ids == i)])
+    # lines(1:100, results$k, col = colors[which(ids == i)])
+
   }
 }
 
-DEoptim(fn = heuristic_model, lower = c(2, log(0.5)), upper = c(20, log(20)), y = data$locations, r = data$prediction, random_seed = random_seeds[which(unique(long$id) == test_id)])
+for (i in ids) {
+  data <- subset(long, id == i)
+  par <- as.numeric(params_kalman[which(params_kalman$id == i), c(FALSE,FALSE,FALSE,FALSE,TRUE,TRUE,TRUE)])
+  results <- subject_kalman_filter(par, y = data$locations)
+  if (i == ids[1]) {
+    plot(1:100, results$k, type = "l", col = colors[which(ids == i)], ylim = c(0,1))
+    kalman_etas <- data.frame(results$k)
+  } else {
+    lines(1:100, results$k, col = colors[which(ids == i)])
+    kalman_etas <- data.frame(kalman_etas, data.frame(results$k))
+  }
+}
+
+lower_quant <- upper_quant <- list()
+for(i in 1:100){upper_quant[i] <- as.numeric(quantile(as.numeric(kalman_etas[i,]))[4]); lower_quant[i] <- as.numeric(quantile(as.numeric(kalman_etas[i,]))[2])}
+plot(1:100, rowMeans(kalman_etas), type = "l", col = "red", ylim=c(0,1), ylab = "Learning rate", xlab = "Trial")
+polygon(1:101, c(0, upper_quant[2:100], 0), col="lightblue3", border = NA)
+polygon(1:102, c(0, lower_quant[2:100],0.9, 0), col="white", border = NA)
+lines(1:100, rowMeans(kalman_etas), col = "lightblue1", ylim=c(0,1), lwd = 3)
+
+
+lower_quant <- rep(quantile(as.numeric(params_delta$k))[2], 100)
+upper_quant <- rep(quantile(as.numeric(params_delta$k))[4], 100)
+for(i in 1:100){upper_quant[i] <- as.numeric(quantile(as.numeric(kalman_etas[i,]))[4]); lower_quant[i] <- as.numeric(quantile(as.numeric(kalman_etas[i,]))[2])}
+plot(1:100, rep(mean(params_delta$k, 100),100), type = "l", col = "red", ylab = "Learning rate", xlab = "Trial", ylim = c(0,1.05))
+polygon(c(0,0,100,100), c(0,quantile(as.numeric(params_delta$k))[4],quantile(as.numeric(params_delta$k))[4],0), col="lightblue3", border = NA)
+polygon(c(0,0,100,100), c(0,quantile(as.numeric(params_delta$k))[2],quantile(as.numeric(params_delta$k))[2],0), col="white", border = NA)
+lines(1:100, rep(mean(params_delta$k, 100),100), col = "lightblue1", lwd = 3)
+
+ids <- unique(long$id[long$set == "sinusoid"])
+boxplot(params_delta$k[params_delta$id %in% ids], params_delta$k[!(params_delta$id %in% ids)], names = c("sinusoid", "block"))
+t.test(params_delta$k[params_delta$id %in% ids], params_delta$k[!(params_delta$id %in% ids)])
+        
