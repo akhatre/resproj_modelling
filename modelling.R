@@ -38,7 +38,7 @@ for (user in users) {
 }
 
 
-
+#creating long dataframe ----
 volatility_block <- c(rep(3,24),rep(30,25),rep(3,25),rep(30,26))
 volatility_sinusoid <- sin(seq(-0.5*pi, 2.5*pi, length.out = 100))*(27)/2 + (((27)/2) + 3)
 
@@ -49,7 +49,6 @@ for (name in names(predictions_block_df)) {
   }
   long <- rbind(long, data.frame(id = name, prediction = predictions_block_df[,name], rts = rts_block_df[,name], update = c(diff(predictions_block_df[,name]),0), locations = locations_block_df[,name], volatility = volatility_block, set = "block"))
 }
-
 for (name in names(predictions_sinusoid_df)) {
   if (name == "asd") {
     next
@@ -58,17 +57,11 @@ for (name in names(predictions_sinusoid_df)) {
 }
 
 long$error <- long$locations - long$prediction
-
 long$set <- factor(long$set)
 contrasts(long$set) <- contr.helmert(2)
 
-#analysing accuracy and rts ----
-
-avrg_err <- aggregate(long$error, by = list (id = long$id), FUN = mean)
+#analysing accuracy and rts, excluding outliers ----
 avrg_rts <- aggregate(long$rts, by = list (id = long$id), FUN = mean)
-
-# avrg_err_outliers <- avrg_err$id[abs(avrg_err$x) > (mean(avrg_err$x) + 2*sd(avrg_err$x))]
-# excluded_players <- rbind(excluded_players, data.frame(id = avrg_err_outliers, reason = rep("avrg error out of 2SD", length(avrg_err_outliers))))
 avrg_rts_outliers <- avrg_rts$id[abs(avrg_rts$x) > (mean(avrg_rts$x) + 2*sd(avrg_rts$x))]
 excluded_players <- rbind(excluded_players, data.frame(id = avrg_rts_outliers, reason = rep("avrg rt out of 2SD", length(avrg_rts_outliers))))
 
@@ -77,36 +70,44 @@ mse_outliers <- mse$id[abs(mse$x) > (mean(mse$x) + 2*sd(mse$x))]
 excluded_players <- rbind(excluded_players, data.frame(id = mse_outliers, reason = rep("mse out of 2SD", length(mse_outliers))))
 
 long <- subset(long, !(id %in% as.character(excluded_players$id)))
-
-ratios_block <- ratios_block[,-c(asd,excluded_players$id[5:8])]
-ratios_sinusoid <- ratios_sinusoid[,-c(asd,excluded_players$id[5:8])]
+ratios_block <- ratios_block[,!(names(ratios_block) %in% c("asd",as.character(excluded_players$id[5:8])))]
+ratios_sinusoid <- ratios_sinusoid[,!(names(ratios_sinusoid) %in% c("asd",as.character(excluded_players$id[5:8])))]
 
 t.test(mse$x[mse$id %in% names(ratios_block)], mse$x[mse$id %in% names(ratios_sinusoid)])
-boxplot(mse$x[mse$id %in% names(ratios_block)], mse$x[mse$id %in% names(ratios_sinusoid)])
-
 t.test(avrg_rts$x[avrg_rts$id %in% names(ratios_block)], avrg_rts$x[avrg_rts$id %in% names(ratios_sinusoid)])
 
+
+#scaling long data set ----
+s <- 100
+long$prediction <- long$prediction*s
+long$locations <- long$locations*s
+long$update <- long$update*s
+long$error <- long$error*s
+
+
+#direct learning rate estimation ----
+
+#plotting learning rates - block
 y <- rowMeans(ratios_block)
 x <- 1:99
 lo <- loess(y ~ x)
 plot(x,y, ylim = c(-0.5,2), type = "l", ylab = "Learning rate", xlab = "Trial", col = "gray")
 lines(predict(lo), col = "red")
-# abline(v=c(25,50,75), col="black", lty = "dashed")
 lines(x,rep(1,99), lty="dashed", col = "cyan")
 lines(x,rep(0,99), lty="dashed", col = "cyan")
 lines(x, volatility_block[1:99]/35, col = "blue")
 
-
+#plotting learning rates - sinusoid
 y <- rowMeans(ratios_sinusoid)
 x <- 1:99
 lo <- loess(y ~ x)
 plot(x,y, ylim = c(-5,5), type = "l", ylab = "Learning rate", xlab = "Trial", col = "gray")
 lines(predict(lo), col = "red")
-# abline(v=c(25,50,75), col="black", lty = "dashed")
 lines(x,rep(1,99), lty="dashed", col = "cyan")
 lines(x,rep(0,99), lty="dashed", col = "cyan")
 lines(x, volatility_sinusoid[1:99]/15, col = "blue")
 
+#plotting learning rates - average
 y <- rowMeans(data.frame(ratios_block,ratios_sinusoid))
 x <- 1:99
 lo <- loess(y ~ x)
@@ -114,31 +115,12 @@ plot(x,y, type = "l", ylim = c(-5,5), ylab = "Learning rate", xlab = "Trial")
 lines(predict(lo), col = "red")
 abline(v=c(25,50,75), col="purple")
 lines(x, volatility_sinusoid[1:99]/15)
-#scaling
 
-s <- 1/100
-long$prediction <- long$prediction*s
-long$locations <- long$locations*s
-long$update <- long$update*s
-long$error <- long$error*s
-
-#asd
-
-#simple ratio analysis ----
-
-#block
+#learning rates per partcipant - high vs low volatility - block
 block_low <- block_high <- array()
 i <- 1
 for (user in names(ratios_block)) {
-  if (user == "asd") {
-    next
-  }
   ratios <- ratios_block[[user]]
-  # plot(1:99, ratios, type = "l", ylab = "Ratio", xlab = "Day", ylim = c(0,5), main = paste("B_R:", user))
-  # abline(v=c(25,50,75), col="purple")
-  # plot(1:100, predictions_block_df[[user]], col="blue", type = "l", ylab = "Preds/loccations", xlab = "Day", main = paste("B_PL:", user))
-  # lines(1:100, locations_block_df[[user]], col="red")
-  # abline(v=c(25,50,75), col="purple")
   plot(1:100, rts_block_df[[user]], type="l")
   block_low[i] <- (sum(ratios[1:25]) + sum(ratios[51:75]))/50
   block_high[i] <- (sum(ratios[26:50]) + sum(ratios[76:99]))/49
@@ -150,8 +132,7 @@ sum(block_high)/length(block_high)
 plot(1:length(block_low), block_low, col = "blue", type = "l")
 lines(1:length(block_low), block_high, col = "red")
 
-#sinusoid
-
+##learning rates per partcipant - high vs low volatility - sinusoid
 sin_low <- sin_high <- array()
 i <- 1
 for (user in names(ratios_sinusoid)) {
@@ -159,11 +140,6 @@ for (user in names(ratios_sinusoid)) {
     next
   }
   ratios <- ratios_sinusoid[[user]]
-  # plot(1:99, ratios, type = "l", ylab = "Ratio", xlab = "Day", ylim = c(0,5), main = paste("S_R:", user))
-  # abline(v=c(25,50,75), col="purple")
-  # plot(1:100, predictions_sinusoid_df[[user]], col="blue", type = "l", ylab = "Preds/loccations", xlab = "Day", main = paste("S_PL:", user))
-  # lines(1:100, locations_sinusoid_df[[user]], col="red")
-  # abline(v=c(25,50,75), col="purple")
   plot(1:100, rts_sinusoid_df[[user]], type="l")
   sin_low[i] <- (sum(ratios[1:25]) + sum(ratios[51:75]))/50
   sin_high[i] <- (sum(ratios[26:50]) + sum(ratios[76:99]))/49
@@ -176,26 +152,20 @@ plot(1:length(sin_low), sin_low, col = "blue", type = "l", ylim = c(0,5))
 lines(1:length(sin_low), sin_high, col = "red")
 
 #regression analysis (mixed effects model) ----
+lme_model_alt <- lmer(update ~ error + error : (volatility + set + volatility:set) + (error + error:volatility|id), data = long, REML = FALSE)
+summary(lme_model_alt)
 
+lme_model_null <- lmer(update ~ error + (error|id), data = long, REML = FALSE)
+summary(lme_model_null)
 
+anova(lme_model_alt, model_null)
 
-model <- lmer(update ~ error * volatility * set + (error|id), data = long)
-summary(model)
+#regression per condition - !!! at block conditon volatility does not have an efect on learning rate if error:volatility is defined as random effect
+lme_model_alt_block_only <- lmer(update ~ error + error:volatility + (error + error:volatility|id), REML = FALSE, data = long[long$set == "block",])
+summary(lme_model_alt_block_only)
 
-model1 <- lmer(update ~ error * volatility * set + (error*volatility|id), data = long)
-summary(model1)
-
-model2 <- lmer(update ~ error + error : (volatility + set + volatility:set) + (error + error:volatility|id), data = long, REML = FALSE)
-summary(model2)
-
-model_null <- lmer(update ~ error + (error|id), data = long, REML = FALSE)
-summary(model_null)
-
-anova(model2, model_null)
-
-long_grad_only <- long[long$set == "sinusoid",]
-model2_for_grad_vol <- lmer(update ~ error + error:volatility + (error + error:volatility|id), REML = FALSE, data = long_grad_only)
-model_for_grad_vol <- lmer(update ~ error * volatility + (error|id), data = long_grad_only, REML = FALSE)
+lme_model_alt_sinusoid_only <- lmer(update ~ error + error:volatility + (error + error:volatility|id), REML = FALSE, data = long[long$set == "sinusoid",])
+summary(lme_model_alt_sinusoid_only)
 
 #estimating learning rate from the model
 long$set_as_number[long$set == "block"] <- -1
@@ -204,16 +174,6 @@ long$eta <- 0.827  + 0.004 * long$volatility + 0.003 * long$set_as_number * long
 
 plot(1:100, long$eta[long$id == unique(long$id)[1]], type = "l", ylim=c(0,1.1), col = "blue", ylab = "Learning rate", xlab = "Trial")
 lines(1:100, long$eta[long$id == unique(long$id)[60]], col = "red")
-
-ids <- unique(long$id)
-etas <- data.frame(long$eta[long$id == ids[1]])
-plot(1:100, etas[,1], type = "l", ylim = c(0.5,1))
-for (n in 2:length(ids)) {
-  etas <-  data.frame(etas, long$eta[long$id == ids[n]])
-  lines(1:100, long$eta[long$id == ids[n]])
-}
-etas <- rowSums(etas)/length(names(etas))
-plot(1:100, etas, type = "l")
 
 #models ----
 resample_systematic <- function(weights) {
@@ -236,13 +196,13 @@ resample_systematic <- function(weights) {
   return(idx)
 }
 
-ll_pf_bootstrap <- function(par, ta0 = FALSE, y, r, num_of_particles = 1000, random_seed=12345) { #that also should take y, r, and num_of_pacticles as input variables. Though, num_of_particles is not to be optimsed at the moment.
+ll_pf_bootstrap <- function(par, ta0 = FALSE, y, r, num_of_particles = 1000, random_seed=12345) {
 
   # set random seed
   set.seed(random_seed)
   
-  # # set parameters
-  # sd_y <- exp(par[1]) #noise of observations, real one was 4
+  # # set parameters [5 params model]
+  # sd_y <- exp(par[1]) #noise of observations
   # sd_r <- exp(par[2]) #noise of participants' responses, unknown
   # logTa_sd0 <- exp(par[3])
   # logTa_mean0 <- par[4]
@@ -252,22 +212,22 @@ ll_pf_bootstrap <- function(par, ta0 = FALSE, y, r, num_of_particles = 1000, ran
   #   sd_ta <- exp(par[5]) #sd of particle update distribution
   # }
   
-  # set parameters
-  sd_y <- par[1] #noise of observations, real one was 4
-  sd_r <- 6
-  logTa_sd0 <- 0.2
-  logTa_mean0 <- 4.9
+  # set parameters [2 params model]
+  sd_y <- par[1] #noise of observations
   if(ta0) {
     sd_ta <- 0
   } else {
     sd_ta <- par[2] #sd of particle update distribution
   }
-  # other defaults
-  estim_mean0 <- 50 # CHANGED was 0.5 should set this to the middle of the screen!
-  estim_var0 <- 100 # CHANGED was 1
+  sd_r <- 6
+  logTa_sd0 <- 0.2
+  logTa_mean0 <- 4.9
   
-  # Bootstrap filter
-  # create matrices to store the particle values and weights
+  # other defaults
+  estim_mean0 <- 0.5 # CHANGED was 0.5 should set this to the middle of the screen!
+  estim_var0 <- 0.01 # CHANGED was 1
+  
+  # screate matrices to store the particle values and weights
   n <- length(y)
   logTa <- Ta <- Wa <- s <- k <- estim_state <- matrix(NA, ncol = num_of_particles, nrow = n)
   mu_out <- rep(0.0,n)
@@ -308,7 +268,6 @@ ll_pf_bootstrap <- function(par, ta0 = FALSE, y, r, num_of_particles = 1000, ran
     mu_out[t+1] <- sum(Wa[t+1,]*estim_state[t+1,])
     
     # draw indices of particles with systematic resampling
-    asd <<- Wa[t+1,]
     idx <- resample_systematic(Wa[t+1,])
     
     # implicitly W <- 1/num_of_particles
@@ -323,7 +282,6 @@ ll_pf_bootstrap <- function(par, ta0 = FALSE, y, r, num_of_particles = 1000, ran
   }
 
   logLik <- -2*sum(dnorm(r, mean=mu_out, sd=sd_r, log=TRUE))
-  pf_vol <<- rowSums(sqrt(Ta)*Wa)
   return(logLik)
 }
 
@@ -331,11 +289,15 @@ pure_kalman_filter <- function(par, y, r, random_seed=12345) {
   set.seed(random_seed)
   n = length(y)
   
-  # set parameters
-  sd_y <- par[1] #noise of observations, real one was 4
+  # set parameters [3 params model]
+  # sd_y <- par[1] #noise of observations
   # sd_r <- par[2] #noise of participants' responses, unknown
-  sd_r <- 6
+  # sd_vol <- par[2]
+  
+  # set parameters [2 params model]
+  sd_y <- par[1] #noise of observations
   sd_vol <- par[2]
+  sd_r <- 6
   
   estim_state <- 50
   k <- 0
@@ -353,11 +315,15 @@ delta_rule <- function(par, y, r, random_seed=12345) {
   set.seed(random_seed)
   n = length(y)
   
-  # set parameters
-  k <- par[1] #noise of observations, real one was 4
+  # set parameters [2 params model]
+  # k <- par[1] #noise of observations
+  # sd_r <- par[2]
+  
+  # set parameters [1 param model]
+  k <- par[1] #noise of observations
   sd_r <- 6
   
-  estim_state <- 50
+  estim_state <- 0.5
   
   for (t in 1:(n-1)) {
     estim_state[t+1] <- estim_state[t] + k * (y[t] - estim_state[t])
@@ -395,8 +361,10 @@ lme_model <- function(par, y, r, eta, random_seed=12345) {
   set.seed(random_seed)
   n = length(y)
   
-  # set parameters
-  sd_r <- par[1]
+  # set parameters [1 param model]
+  # sd_r <- par[1]
+  
+  # set parameters [0 param model]
   sd_r <- 6
   
   estim_state <- 50
@@ -410,7 +378,7 @@ lme_model <- function(par, y, r, eta, random_seed=12345) {
 }
 
 
-#serial optimisation----
+#serial Nelder Mead optimisation - OUTDATED - optim functions have outdated parameter vector structures ----
 set.seed(122334455)
 random_seeds <- sample(1:10000000,length(unique(long$id)))
 estimated_par <- list()
@@ -434,7 +402,7 @@ for (i in names(estimated_par)) {
 summary(pars_btsrp$logLik[1:75])
 sd(pars_btsrp$logLik[1:75])
 
-#parallel optimisation----
+#parallel Nelder Mead optimisation - OUTDATE - optim functions have outdated parameter vector structures ----
 set.seed(122334455)
 random_seeds <- sample(1:10000000,length(unique(long$id)))
 
@@ -478,7 +446,7 @@ optim_res_delta <- parLapply(cluster, unique(long$id), fun = prl_optimisation_de
 optim_res_heuristic <- parLapply(cluster, unique(long$id), fun = prl_optimisation_heuristic)
 stopCluster(cluster)
 
-params_heuristic <- params_delta <- params_btstrp_fixed_ta <- params_btstrp_var_ta <- params_kalman <- data.frame(Deviance = rep(0, length(optim_res_btstrp_var_ta)))
+params_delta <- params_btstrp_fixed_ta <- params_btstrp_var_ta <- params_kalman <- data.frame(Deviance = rep(0, length(optim_res_btstrp_var_ta)))
 for (i in 1:length(optim_res_btstrp_var_ta)) {
   params_btstrp_fixed_ta$Deviance[i] <- optim_res_btstrp_fixed_ta[[i]]$value
   params_btstrp_fixed_ta$AIC[i] <- optim_res_btstrp_fixed_ta[[i]]$value + 2*4
@@ -513,13 +481,6 @@ for (i in 1:length(optim_res_btstrp_var_ta)) {
   params_delta$k[i] <- optim_res_delta[[i]]$par[1]
   params_delta$sd_r[i] <- exp(optim_res_delta[[i]]$par[2])
   params_delta$id[i] <- optim_res_delta[[i]][[1]]
-  
-  params_heuristic$Deviance[i] <- optim_res_heuristic[[i]]$value
-  params_heuristic$AIC[i] <- optim_res_heuristic[[i]]$value + 2*2
-  params_heuristic$BIC[i] <- optim_res_heuristic[[i]]$value + log(100)*2
-  params_heuristic$a[i] <- optim_res_heuristic[[i]]$par[1]
-  params_heuristic$sd_r[i] <- exp(optim_res_heuristic[[i]]$par[2])
-  params_heuristic$id[i] <- optim_res_heuristic[[i]][[1]]
 }
 
 params_pf_1_nm <- data.frame(Deviance = rep(0, length(optim_res_btstrp_var_ta)))
@@ -537,18 +498,18 @@ for (i in 1:length(optim_res_btstrp_var_ta)) {
 
 
 #evolutionary optimisation ----
-deoptim_res_btstrp_var_ta <- deoptim_res_btstrp_fixed_ta <- list()
+set.seed(122334455)
+random_seeds <- sample(1:10000000,length(unique(long$id)))
+no_cores <- detectCores()
+cluster <- makeCluster(no_cores, type = "FORK")
 ids <- unique(long$id)
-for (i in ids[11:96]) {
-  data <- subset(long, id == i)
-  deoptim_res_btstrp_var_ta[[i]] <- DEoptim(fn = ll_pf_bootstrap, lower = c(0, 0, 0, log(0.001), 0), upper = c(10, 10, 10, 5, 30), y = data$locations, r = data$prediction, random_seed = random_seeds[which(unique(long$id) == i)], control = DEoptim.control(cluster = cluster))
-  deoptim_res_btstrp_fixed_ta[[i]] <- DEoptim(fn = ll_pf_bootstrap, lower = c(0, 0, 0, log(0.001)), upper = c(10, 10, 10, 5), y = data$locations, r = data$prediction, ta0 = TRUE, random_seed = random_seeds[which(unique(long$id) == i)], control = DEoptim.control(cluster = cluster))
-}
 
-deoptim_res_delta_2 <- list()
+# that was for intial optimisation design WITH sd_r, logTa_sd, logTa_mean
+#THIS VECTOR STORES LONG OPTIMISED VALUES deoptim_res_btstrp_var_ta <- deoptim_res_btstrp_fixed_ta <- list()
 for (i in ids) {
   data <- subset(long, id == i)
-  deoptim_res_delta_2[[i]] <- DEoptim(fn = delta_rule, lower = c(0), upper = c(10), y = data$locations, r = data$prediction, random_seed = random_seeds[which(unique(long$id) == i)], control = DEoptim.control(cluster = cluster))
+  #THIS VECTOR STORES LONG OPTIMISED VALUES deoptim_res_btstrp_var_ta[[i]] <- DEoptim(fn = ll_pf_bootstrap, lower = c(0, 0, 0, log(0.001), 0), upper = c(10, 10, 10, 5, 30), y = data$locations, r = data$prediction, random_seed = random_seeds[which(unique(long$id) == i)], control = DEoptim.control(cluster = cluster))
+  #THIS VECTOR STORES LONG OPTIMISED VALUES deoptim_res_btstrp_fixed_ta[[i]] <- DEoptim(fn = ll_pf_bootstrap, lower = c(0, 0, 0, log(0.001)), upper = c(10, 10, 10, 5), y = data$locations, r = data$prediction, ta0 = TRUE, random_seed = random_seeds[which(unique(long$id) == i)], control = DEoptim.control(cluster = cluster))
 }
 
 deoptim_res_lme <- list()
@@ -557,45 +518,71 @@ for (i in ids) {
   deoptim_res_lme[[i]] <- DEoptim(fn = lme_model, lower = c(0), upper = c(10), y = data$locations, r = data$prediction, eta = data$eta, random_seed = random_seeds[which(unique(long$id) == i)], control = DEoptim.control(cluster = cluster))
 }
 
-deoptim_res_kalman_2 <- list()
+# those are adapted for relevant models WITHOUT sd_r
+deoptim_res_delta <- list()
 for (i in ids) {
   data <- subset(long, id == i)
-  deoptim_res_kalman_2[[i]] <- DEoptim(fn = pure_kalman_filter, lower = c(0,0), upper = c(30,40), y = data$locations, r = data$prediction, random_seed = random_seeds[which(unique(long$id) == i)], control = DEoptim.control(cluster = cluster))
+  deoptim_res_delta[[i]] <- DEoptim(fn = delta_rule, lower = c(0), upper = c(10), y = data$locations, r = data$prediction, random_seed = random_seeds[which(unique(long$id) == i)], control = DEoptim.control(cluster = cluster))
 }
 
-set.seed(677889910)
-random_seeds_for_deoptim <- sample(1:10000000,length(unique(long$id)))
-deoptim_res_btstrp_var_ta_5 <- list()
+deoptim_res_kalman <- list()
+for (i in ids) {
+  data <- subset(long, id == i)
+  deoptim_res_kalman[[i]] <- DEoptim(fn = pure_kalman_filter, lower = c(0,0), upper = c(30,40), y = data$locations, r = data$prediction, random_seed = random_seeds[which(unique(long$id) == i)], control = DEoptim.control(cluster = cluster))
+}
+
+#THIS VECTOR STORES LONG OPTIMISED VALUES deoptim_res_btstrp_var_ta <- list()
 for (i in ids) {
   print(paste("Starting optimisation of", as.character(which(ids == i)), "participant out of 96"))
   data <- subset(long, id == i)
-  # set.seed(random_seeds_for_deoptim[which(unique(long$id) == i)])
-  deoptim_res_btstrp_var_ta_5[[i]] <- DEoptim(fn = ll_pf_bootstrap, lower = c(0, 0), upper = c(30, 5), y = data$locations, r = data$prediction, random_seed = random_seeds[which(unique(long$id) == i)], control = DEoptim.control(cluster = cluster))
+  #THIS VECTOR STORES LONG OPTIMISED VALUES deoptim_res_btstrp_var_ta[[i]] <- DEoptim(fn = ll_pf_bootstrap, lower = c(0, 0), upper = c(30, 5), y = data$locations, r = data$prediction, random_seed = random_seeds[which(unique(long$id) == i)], control = DEoptim.control(cluster = cluster))
 }
 
-deoptim_res_delta_for_all <- list()
+#deoptim for all
 deoptim_res_delta_for_all <- DEoptim(fn = delta_rule_for_all, lower = c(0, rep(-5,96)), upper = c(30, rep(5,96)), control = DEoptim.control(cluster = cluster))
 
-params_pf_4 <- params_pf_3 <- params_pf_2 <- params_pf_1 <- data.frame(id = ids)
+
+# making sense of optimisation results ----
+params_pf_6 <- params_pf_5 <- params_pf_4 <- params_pf_3 <- params_pf_2 <- params_pf_1 <- data.frame(id = ids)
 for(i in ids) {
+  # sd_y limited from 0 to 0.5; sd_ta limited from 0 to 0.5; scale 0-1; other fixed params were logTa_mean=-3; logTa_sd=1; sd_r=0.01; estim_mean=0.5, estim_var=0.01
+  params_pf_6$Deviance[which(params_pf_6$id == i)] <- deoptim_res_btstrp_var_ta_6[[i]]$optim$bestval
+  params_pf_6$AIC[which(params_pf_6$id == i)] <- deoptim_res_btstrp_var_ta_6[[i]]$optim$bestval + 2*2
+  params_pf_6$BIC[which(params_pf_6$id == i)] <- deoptim_res_btstrp_var_ta_6[[i]]$optim$bestval +log(100)*2
+  params_pf_6$sd_y[which(params_pf_6$id == i)] <- deoptim_res_btstrp_var_ta_6[[i]]$optim$bestmem[[1]]
+  params_pf_6$sd_ta[which(params_pf_6$id == i)] <- deoptim_res_btstrp_var_ta_6[[i]]$optim$bestmem[[2]]
+  
+  # sd_y limited from 0 to 30; sd_ta limited from 0 to 5; scale 0-1; other fixed params as in the code
+  params_pf_5$Deviance[which(params_pf_5$id == i)] <- deoptim_res_btstrp_var_ta_5[[i]]$optim$bestval
+  params_pf_5$AIC[which(params_pf_5$id == i)] <- deoptim_res_btstrp_var_ta_5[[i]]$optim$bestval + 2*2
+  params_pf_5$BIC[which(params_pf_5$id == i)] <- deoptim_res_btstrp_var_ta_5[[i]]$optim$bestval +log(100)*2
+  params_pf_5$sd_y[which(params_pf_5$id == i)] <- deoptim_res_btstrp_var_ta_5[[i]]$optim$bestmem[[1]]
+  params_pf_5$sd_ta[which(params_pf_5$id == i)] <- deoptim_res_btstrp_var_ta_5[[i]]$optim$bestmem[[2]]
+  
+  # sd_y limited from 0 to 30; sd_ta limited from 0 to 5; scale 0-100; other fixed params as in the code
   params_pf_4$Deviance[which(params_pf_4$id == i)] <- deoptim_res_btstrp_var_ta_4[[i]]$optim$bestval
   params_pf_4$AIC[which(params_pf_4$id == i)] <- deoptim_res_btstrp_var_ta_4[[i]]$optim$bestval + 2*2
   params_pf_4$BIC[which(params_pf_4$id == i)] <- deoptim_res_btstrp_var_ta_4[[i]]$optim$bestval +log(100)*2
   params_pf_4$sd_y[which(params_pf_4$id == i)] <- deoptim_res_btstrp_var_ta_4[[i]]$optim$bestmem[[1]]
   params_pf_4$sd_ta[which(params_pf_4$id == i)] <- deoptim_res_btstrp_var_ta_4[[i]]$optim$bestmem[[2]]
   
+  # sd_y limited from 0 to 30; sd_ta limited from 0.5 to 5; scale 0-100; other fixed params as in the code
   params_pf_3$Deviance[which(params_pf_3$id == i)] <- deoptim_res_btstrp_var_ta_3[[i]]$optim$bestval
   params_pf_3$AIC[which(params_pf_3$id == i)] <- deoptim_res_btstrp_var_ta_3[[i]]$optim$bestval + 2*2
   params_pf_3$BIC[which(params_pf_3$id == i)] <- deoptim_res_btstrp_var_ta_3[[i]]$optim$bestval +log(100)*2
   params_pf_3$sd_y[which(params_pf_3$id == i)] <- deoptim_res_btstrp_var_ta_3[[i]]$optim$bestmem[[1]]
   params_pf_3$sd_ta[which(params_pf_3$id == i)] <- deoptim_res_btstrp_var_ta_3[[i]]$optim$bestmem[[2]]
   
+  # that was that magic optimisation run whose results I cannot replicate
+  # sd_y limited from 0 to 30; sd_ta limited from 0 to 5
+  # not sure about scale and other fixed params, but have tried different variants and neither yields same deviances as reported in deoptim vector below
   params_pf_2$Deviance[which(params_pf_2$id == i)] <- deoptim_res_btstrp_var_ta_2[[i]]$optim$bestval
   params_pf_2$AIC[which(params_pf_2$id == i)] <- deoptim_res_btstrp_var_ta_2[[i]]$optim$bestval + 2*2
   params_pf_2$BIC[which(params_pf_2$id == i)] <- deoptim_res_btstrp_var_ta_2[[i]]$optim$bestval +log(100)*2
   params_pf_2$sd_y[which(params_pf_2$id == i)] <- deoptim_res_btstrp_var_ta_2[[i]]$optim$bestmem[[1]]
   params_pf_2$sd_ta[which(params_pf_2$id == i)] <- deoptim_res_btstrp_var_ta_2[[i]]$optim$bestmem[[2]]
   
+  # 5-param variable sd_ta PF
   params_pf_1$Deviance[which(params_pf_1$id == i)] <- deoptim_res_btstrp_var_ta[[i]]$optim$bestval
   params_pf_1$AIC[which(params_pf_1$id == i)] <- deoptim_res_btstrp_var_ta[[i]]$optim$bestval + 2*5
   params_pf_1$BIC[which(params_pf_1$id == i)] <- deoptim_res_btstrp_var_ta[[i]]$optim$bestval +log(100)*5
@@ -605,58 +592,37 @@ for(i in ids) {
   params_pf_1$log_mean_ta[which(params_pf_1$id == i)] <- deoptim_res_btstrp_var_ta[[i]]$optim$bestmem[[4]]
   params_pf_1$sd_ta[which(params_pf_1$id == i)] <- deoptim_res_btstrp_var_ta[[i]]$optim$bestmem[[5]]
   
-  # params_btstrp_fixed_ta$Deviance[which(params_btstrp_var_ta$id == i)] <- deoptim_res_btstrp_fixed_ta[[i]]$optim$bestval
-  # params_btstrp_fixed_ta$AIC[which(params_btstrp_var_ta$id == i)] <- deoptim_res_btstrp_fixed_ta[[i]]$optim$bestval + 2*4
-  # params_btstrp_fixed_ta$BIC[which(params_btstrp_var_ta$id == i)] <- deoptim_res_btstrp_fixed_ta[[i]]$optim$bestval +log(100)*4
-  # params_btstrp_fixed_ta$sd_y[which(params_btstrp_var_ta$id == i)] <- deoptim_res_btstrp_fixed_ta[[i]]$optim$bestmem[[1]]
-  # params_btstrp_fixed_ta$sd_r[which(params_btstrp_var_ta$id == i)] <- deoptim_res_btstrp_fixed_ta[[i]]$optim$bestmem[[2]]
-  # params_btstrp_fixed_ta$log_sd_ta[which(params_btstrp_var_ta$id == i)] <- deoptim_res_btstrp_fixed_ta[[i]]$optim$bestmem[[3]]
-  # params_btstrp_fixed_ta$log_mean_ta[which(params_btstrp_var_ta$id == i)] <- deoptim_res_btstrp_fixed_ta[[i]]$optim$bestmem[[4]]
+  # 4-param fixed sd_ta PF
+  params_btstrp_fixed_ta$Deviance[which(params_btstrp_var_ta$id == i)] <- deoptim_res_btstrp_fixed_ta[[i]]$optim$bestval
+  params_btstrp_fixed_ta$AIC[which(params_btstrp_var_ta$id == i)] <- deoptim_res_btstrp_fixed_ta[[i]]$optim$bestval + 2*4
+  params_btstrp_fixed_ta$BIC[which(params_btstrp_var_ta$id == i)] <- deoptim_res_btstrp_fixed_ta[[i]]$optim$bestval +log(100)*4
+  params_btstrp_fixed_ta$sd_y[which(params_btstrp_var_ta$id == i)] <- deoptim_res_btstrp_fixed_ta[[i]]$optim$bestmem[[1]]
+  params_btstrp_fixed_ta$sd_r[which(params_btstrp_var_ta$id == i)] <- deoptim_res_btstrp_fixed_ta[[i]]$optim$bestmem[[2]]
+  params_btstrp_fixed_ta$log_sd_ta[which(params_btstrp_var_ta$id == i)] <- deoptim_res_btstrp_fixed_ta[[i]]$optim$bestmem[[3]]
+  params_btstrp_fixed_ta$log_mean_ta[which(params_btstrp_var_ta$id == i)] <- deoptim_res_btstrp_fixed_ta[[i]]$optim$bestmem[[4]]
 }
 
-params_delta <- params_lme <- data.frame(id = ids)
+params_delta <- data.frame(id = ids)
 for(i in ids) {
-  params_delta$Deviance[which(params_delta$id == i)] <- deoptim_res_delta_2[[i]]$optim$bestval
-  params_delta$AIC[which(params_delta$id == i)] <- deoptim_res_delta_2[[i]]$optim$bestval + 2*1
-  params_delta$BIC[which(params_delta$id == i)] <- deoptim_res_delta_2[[i]]$optim$bestval +log(100)*1
-  params_delta$k[which(params_delta$id == i)] <- deoptim_res_delta_2[[i]]$optim$bestmem[[1]]
-  # params_delta$sd_r[which(params_delta$id == i)] <- deoptim_res_delta[[i]]$optim$bestmem[[2]]
-  
-  # params_lme$Deviance[which(params_lme$id == i)] <- deoptim_res_lme[[i]]$optim$bestval
-  # params_lme$AIC[which(params_lme$id == i)] <- deoptim_res_lme[[i]]$optim$bestval #+ 2
-  # params_lme$BIC[which(params_lme$id == i)] <- deoptim_res_lme[[i]]$optim$bestval #+ log(100)
-  # params_lme$sd_r[which(params_lme$id == i)] <- deoptim_res_lme[[i]]$optim$bestmem[[1]]
+  params_delta$Deviance[which(params_delta$id == i)] <- deoptim_res_delta[[i]]$optim$bestval
+  params_delta$AIC[which(params_delta$id == i)] <- deoptim_res_delta[[i]]$optim$bestval + 2*1
+  params_delta$BIC[which(params_delta$id == i)] <- deoptim_res_delta[[i]]$optim$bestval +log(100)*1
+  params_delta$k[which(params_delta$id == i)] <- deoptim_res_delta[[i]]$optim$bestmem[[1]]
 }
 
 params_kalman <- data.frame(id = ids)
 for(i in ids) {
-  params_kalman$Deviance[which(params_kalman$id == i)] <- deoptim_res_kalman_2[[i]]$optim$bestval
-  params_kalman$AIC[which(params_kalman$id == i)] <- deoptim_res_kalman_2[[i]]$optim$bestval + 2*2
-  params_kalman$BIC[which(params_kalman$id == i)] <- deoptim_res_kalman_2[[i]]$optim$bestval + log(100)*2
-  params_kalman$sd_y[which(params_kalman$id == i)] <- deoptim_res_kalman_2[[i]]$optim$bestmem[[1]]
-  # params_kalman$sd_r[which(params_kalman$id == i)] <- deoptim_res_kalman[[i]]$optim$bestmem[[2]]
-  params_kalman$sd_vol[which(params_kalman$id == i)] <- deoptim_res_kalman_2[[i]]$optim$bestmem[[2]]
-}
-
-deoptim_res_lme_for_all <- deoptim_res_delta_for_all <- list()
-deoptim_res_delta_for_all <- DEoptim(fn = delta_rule_for_all, lower = c(0, 0), upper = c(10, 10), random_seed = random_seeds[which(unique(long$id) == i)], control = DEoptim.control(cluster = cluster))
-
-params_btstrp_var_ta_5par <- data.frame(id = ids)
-for(i in ids) {
-  params_btstrp_var_ta_5par$Deviance[which(params_btstrp_var_ta_5par$id == i)] <- deoptim_res_btstrp_var_ta[[i]]$optim$bestval
-  params_btstrp_var_ta_5par$AIC[which(params_btstrp_var_ta_5par$id == i)] <- deoptim_res_btstrp_var_ta[[i]]$optim$bestval + 2*5
-  params_btstrp_var_ta_5par$BIC[which(params_btstrp_var_ta_5par$id == i)] <- deoptim_res_btstrp_var_ta[[i]]$optim$bestval +log(100)*5
-  params_btstrp_var_ta_5par$sd_y[which(params_btstrp_var_ta_5par$id == i)] <- deoptim_res_btstrp_var_ta[[i]]$optim$bestmem[[1]]
-  params_btstrp_var_ta_5par$sd_r[which(params_btstrp_var_ta_5par$id == i)] <- deoptim_res_btstrp_var_ta[[i]]$optim$bestmem[[2]]
-  params_btstrp_var_ta_5par$log_sd_ta[which(params_btstrp_var_ta_5par$id == i)] <- deoptim_res_btstrp_var_ta[[i]]$optim$bestmem[[3]]
-  params_btstrp_var_ta_5par$log_mean_ta[which(params_btstrp_var_ta_5par$id == i)] <- deoptim_res_btstrp_var_ta[[i]]$optim$bestmem[[4]]
-  params_btstrp_var_ta_5par$sd_ta[which(params_btstrp_var_ta_5par$id == i)] <- deoptim_res_btstrp_var_ta[[i]]$optim$bestmem[[5]]
-
+  params_kalman$Deviance[which(params_kalman$id == i)] <- deoptim_res_kalman[[i]]$optim$bestval
+  params_kalman$AIC[which(params_kalman$id == i)] <- deoptim_res_kalman[[i]]$optim$bestval + 2*2
+  params_kalman$BIC[which(params_kalman$id == i)] <- deoptim_res_kalman[[i]]$optim$bestval + log(100)*2
+  params_kalman$sd_y[which(params_kalman$id == i)] <- deoptim_res_kalman[[i]]$optim$bestmem[[1]]
+  params_kalman$sd_vol[which(params_kalman$id == i)] <- deoptim_res_kalman[[i]]$optim$bestmem[[2]]
 }
 
 
 #comparing models ----
-models <- data.frame(model = c("params_btstrp_var_ta", "params_kalman", "params_delta"))
+#set name of particular PF optimisation results to compare
+models <- data.frame(model = c("params_pf_2", "params_kalman", "params_delta"))
 for (model in models$model) {
   model_params <- get(model)
   other_models <- as.character(models$model[models$model!=model])
@@ -674,80 +640,20 @@ for (model in models$model) {
   models$dDeviance_sd[row_index] <- sd(params_delta$Deviance - model_params$Deviance)
   models$nDeviance[row_index] <- table(model_params$Deviance < get(other_models[1])$Deviance & model_params$Deviance < get(other_models[2])$Deviance)["TRUE"] #& model_params$Deviance < get(other_models[3])$Deviance & model_params$Deviance < get(other_models[4])$Deviance
 }
+
+#rounding
 for (i in 2:length(names(models))) {
   models[,i] <- round(models[,i], digits = 2)
 }
 
+#plotting boxplots
+boxplot(params_pf_2$AIC, params_kalman$AIC, params_delta$AIC, names=c("PF", "KF", "DR"), ylab = "AIC")
+boxplot(params_pf_2$BIC, params_kalman$BIC, params_delta$BIC, names=c("PF", "KF", "DR"), ylab = "BIC")
 
-
-block_ids <- params_btstrp_var_ta$id %in% unique(long$id[long$set == "block"])
-param <- "Deviance"
-
-points <- points1 <- points2 <- points2 <- rep("red",96)
-points[block_ids] <- "blue"
-get_params <- function(param, sort = FALSE, model) {
-  if (sort) {
-    result <- sort(get(model)[[param]])
-  } else {
-    result <- get(model)[[param]]
-  }
-  return(result)
-}
-
-plot_params <- function(param_name, sort = FALSE, model_names, ylim = FALSE, xlim = FALSE) {
-  set.seed(3)
-  colors <- c("red","blue","green","grey","purple","orange","magenta","brown","pink","cyan")
-  i <- 1
-  par(cex = 1)
-  for (model_name in model_names) {
-    model <- get(model_name)
-    n <- length(model$id)
-    block_ids <- model$id %in% unique(long$id[long$set == "block"])
-    points <- rep("0",n)
-    points[-block_ids] <- colors[i]
-    points[block_ids] <- colors[i+1]
-    param <- get_params(param_name, sort = sort, model_name)
-    if (ylim==FALSE && xlim==FALSE){ylim <- c(min(param),max(param)); xlim <- c(1,n)}
-    if (which(model_name == model_names) == 1) {plot(1:n, param, col = points, ylim=ylim, xlim=xlim)}
-    else {points(1:n, param, col = points)}
-    i <- i + 2
-  }
-  par(cex = 0.5)
-  legend("bottomright", legend = rep(model_names, each = 2), col = colors, lty = 1)
-}
-
-models_names <- c("params_btstrp_var_ta", "params_kalman", "params_delta")
-plot_params("AIC", model_names = models_names, sort = FALSE)
-
-boxplot(params_btstrp_var_ta$AIC, params_kalman$AIC, params_delta$AIC, names=c("PF", "KF", "DR"), ylab = "AIC", ylim = c(400,900))
-boxplot(params_btstrp_var_ta$BIC, params_kalman$BIC, params_delta$BIC, names=c("PF", "KF", "DR"), ylab = "BIC")
-
-boxplot(params_btstrp_var_ta$AIC, params_kalman$AIC, params_delta$AIC, params_lme$AIC, names=c("PF", "KLMN", "DLT", "LME"), ylab = "AIC")
-boxplot(params_btstrp_var_ta$BIC, params_kalman$BIC, params_delta$BIC, params_lme$BIC, names=c("PF", "KLMN", "DLT", "LME"), ylab = "BIC")
-
-boxplot(params_btstrp_var_ta$AIC,params_btstrp_fixed_ta$AIC,params_kalman$AIC,params_lme$AIC, params_delta$AIC,names=c("PF_TV", "PF_NTV", "KLMN", "LME", "DLT"), ylab = "AIC")
-boxplot(params_btstrp_var_ta$BIC,params_btstrp_fixed_ta$BIC,params_kalman$BIC,params_lme$BIC, params_delta$BIC,names=c("PF_TV", "PF_NTV", "KLMN", "LME", "DLT"), ylab = "BIC")
-
-#debugging
-test_id <- "05lfqZKIxbPaV1kS9Go8wXzeqVI2"
-prl_optimisation_btstrp_var_ta(test_id)
-prl_optimisation_btstrp_fixed_ta(test_id)
-prl_optimisation_kalman(test_id)
-
-
-plot(1:100, pure_kalman_filter(c(6.186476, 1.408480, 7.444722), y = long$locations[long$id == test_id], r = long$prediction[long$id == test_id]), type = "l")
-
-ll_pf_for_all <- function(par) {
-  ids <- unique(long$id)
-  deviance <- 0
-  for (i in 1:length(ids)) {
-    data <- subset(long, id==ids[i])
-    deviance[i] <- ll_pf_bootstrap(par, y = data$locations, r = data$prediction)
-  }
-  return(sum(deviance))
-}
-
-
+# boxplot(params_btstrp_var_ta$AIC, params_kalman$AIC, params_delta$AIC, params_lme$AIC, names=c("PF", "KLMN", "DLT", "LME"), ylab = "AIC")
+# boxplot(params_btstrp_var_ta$BIC, params_kalman$BIC, params_delta$BIC, params_lme$BIC, names=c("PF", "KLMN", "DLT", "LME"), ylab = "BIC")
+# boxplot(params_btstrp_var_ta$AIC,params_btstrp_fixed_ta$AIC,params_kalman$AIC,params_lme$AIC, params_delta$AIC,names=c("PF_TV", "PF_NTV", "KLMN", "LME", "DLT"), ylab = "AIC")
+# boxplot(params_btstrp_var_ta$BIC,params_btstrp_fixed_ta$BIC,params_kalman$BIC,params_lme$BIC, params_delta$BIC,names=c("PF_TV", "PF_NTV", "KLMN", "LME", "DLT"), ylab = "BIC")
 
 
 # watching learning rate ----
@@ -855,55 +761,20 @@ subject_kalman_filter <- function(par, y, random_seed=12345) {
   results <- data.frame(k = k, mu = estim_state)
   return(results)
 }
-subject_heuristic_model <- function(par, y, random_seed=12345) {
-  set.seed(random_seed)
-  n = length(y)
-  
-  # set parameters
-  a <- round(par[1])
-  
-  estim_state <- 50
-  k <- c(1,1)
-  
-  e <- y[1] - estim_state[1]
-  estim_state[2] <- estim_state[1] + k[2] * e[1]
-  
-  sigmoid_k <- 1/(1+exp(10:-10))
-  
-  for (t in 2:(n-1)) {
-    e[t] <- y[t] - estim_state[t]
-    
-    if (abs(e[t]) < abs(e[t-1])) {
-      if(a >= 1 & a < 21){a <- a + 1}
-      k[t+1] <- sigmoid_k[a]
-    } else {
-      if(a > 1 & a <= 21){a <- a - 1}
-      k[t+1] <- sigmoid_k[a]
-    }
-    
-    estim_state[t+1] <- estim_state[t] + k[t+1] * e[t]
-  }
-  
-  results <- data.frame(k = k, mu = estim_state)
-  return(results)
-}
 
 colors = colors()[sample(1:length(colors()), length(ids), replace=FALSE)]
 
-ids <- unique(long$id[long$set == "block"])
+#plotting learning rates from PF
 ids <- unique(long$id)
-ids <- pf_participants
-ids <- unique(long$id)[!(unique(long$id) %in% pf_participants)]
 for (i in ids) {
-  # if (i %in% pf_participants){print("asd");next}
   data <- subset(long, id == i)
   par <- as.numeric(params_btstrp_var_ta[which(params_btstrp_var_ta$id == i), c(FALSE,FALSE,FALSE,FALSE,TRUE,TRUE)])
   results <- subject_pf_bootstrap(par, y = data$locations, random_seed = random_seeds[which(unique(long$id) == i)])
-  if (i == ids[1]) { #set index to 2 if skipping pf paricipants
-    # plot(1:100, results$k, type = "l", col = colors[which(ids == i)])
+  if (i == ids[1]) {
+    plot(1:100, results$k, type = "l", col = colors[which(ids == i)])
     pf_var_ta_etas <- data.frame(results$k)
   } else {
-    # lines(1:100, results$k, col = colors[which(ids == i)])
+    lines(1:100, results$k, col = colors[which(ids == i)])
     pf_var_ta_etas <- data.frame(pf_var_ta_etas, data.frame(results$k))
   }
 }
@@ -915,19 +786,8 @@ polygon(1:101, c(0, upper_quant[2:100], 0), col="lightblue3", border = NA)
 polygon(1:102, c(0, lower_quant[2:100],0.9, 0), col="white", border = NA)
 lines(1:100, rowMeans(pf_var_ta_etas), col = "lightblue1", ylim=c(0,1), lwd = 3)
 
-for (i in ids) {
-  data <- subset(long, id == i)
-  par <- as.numeric(params_btstrp_fixed_ta[which(params_btstrp_fixed_ta$id == i), c(FALSE,FALSE,FALSE,FALSE,TRUE,TRUE,TRUE,TRUE)])
-  results <- subject_pf_bootstrap(par, y = data$locations, ta0 = TRUE)
-  if (i == ids[1]) {
-    # plot(1:100, results$k, type = "l", col = colors[which(ids == i)])
 
-  } else {
-    # lines(1:100, results$k, col = colors[which(ids == i)])
-
-  }
-}
-
+#plotting learning rates from kalman filter
 for (i in ids) {
   data <- subset(long, id == i)
   par <- as.numeric(params_kalman[which(params_kalman$id == i), c(FALSE,FALSE,FALSE,FALSE,TRUE,TRUE)])
@@ -948,7 +808,7 @@ polygon(1:101, c(0, upper_quant[2:100], 0), col="lightblue3", border = NA)
 polygon(1:102, c(0, lower_quant[2:100],0.9, 0), col="white", border = NA)
 lines(1:100, rowMeans(kalman_etas), col = "lightblue1", ylim=c(0,1), lwd = 3)
 
-
+# plotting learning rates from delta
 lower_quant <- rep(quantile(as.numeric(params_delta$k))[2], 100)
 upper_quant <- rep(quantile(as.numeric(params_delta$k))[4], 100)
 plot(1:100, rep(mean(params_delta$k, 100),100), type = "l", col = "red", ylab = "Learning rate", xlab = "Trial", ylim = c(0,1.05))
@@ -979,9 +839,48 @@ t.test(params_btstrp_var_ta[params_btstrp_var_ta$id %in% pf_participants,"sd_ta"
 boxplot(params_btstrp_var_ta[params_btstrp_var_ta$id %in% pf_participants,"sd_y"],params_btstrp_var_ta[!(params_btstrp_var_ta$id %in% pf_participants),"sd_y"], names = c("Best fitted by PF", "Best fitted by KF & DR"), main = "Estimated noise")
 t.test(params_btstrp_var_ta[params_btstrp_var_ta$id %in% pf_participants,"sd_y"],params_btstrp_var_ta[!(params_btstrp_var_ta$id %in% pf_participants),"sd_y"])
 
-#comparing volatility
+#debugging ----
+#comparing fit across models and participants
+block_ids <- params_btstrp_var_ta$id %in% unique(long$id[long$set == "block"])
+param <- "Deviance"
 
-#debugging 
+points <- points1 <- points2 <- points2 <- rep("red",96)
+points[block_ids] <- "blue"
+get_params <- function(param, sort = FALSE, model) {
+  if (sort) {
+    result <- sort(get(model)[[param]])
+  } else {
+    result <- get(model)[[param]]
+  }
+  return(result)
+}
+
+plot_params <- function(param_name, sort = FALSE, model_names, ylim = FALSE, xlim = FALSE) {
+  set.seed(3)
+  colors <- c("red","blue","green","grey","purple","orange","magenta","brown","pink","cyan")
+  i <- 1
+  par(cex = 1)
+  for (model_name in model_names) {
+    model <- get(model_name)
+    n <- length(model$id)
+    block_ids <- model$id %in% unique(long$id[long$set == "block"])
+    points <- rep("0",n)
+    points[-block_ids] <- colors[i]
+    points[block_ids] <- colors[i+1]
+    param <- get_params(param_name, sort = sort, model_name)
+    if (ylim==FALSE && xlim==FALSE){ylim <- c(min(param),max(param)); xlim <- c(1,n)}
+    if (which(model_name == model_names) == 1) {plot(1:n, param, col = points, ylim=ylim, xlim=xlim)}
+    else {points(1:n, param, col = points)}
+    i <- i + 2
+  }
+  par(cex = 0.5)
+  legend("bottomright", legend = rep(model_names, each = 2), col = colors, lty = 1)
+}
+
+models_names <- c("params_btstrp_var_ta", "params_kalman", "params_delta")
+plot_params("AIC", model_names = models_names, sort = FALSE)
+
+#trying to replicate the results from params_pf_2
 s <- 1/100
 long$prediction <- long$prediction*s
 long$locations <- long$locations*s
@@ -1006,9 +905,9 @@ params_btstrp_var_ta$BIC <- deviance + log(100)*2
 params_btstrp_var_ta$sd_y <- params_pf_2$sd_y
 params_btstrp_var_ta$sd_ta <- params_pf_2$sd_ta
 
-boxplot(params_pf_1_nm$Deviance, params_pf_1$Deviance, params_pf_2$Deviance, params_pf_3$Deviance, params_pf_4$Deviance)
-boxplot(params_pf_1_nm$sd_y, params_pf_1$sd_y, params_pf_2$sd_y, params_pf_3$sd_y, params_pf_4$sd_y)
-boxplot(params_pf_1_nm$sd_ta, params_pf_1$sd_ta, params_pf_2$sd_ta, params_pf_3$sd_ta, params_pf_4$sd_ta)
+boxplot(params_pf_1_nm$Deviance, params_pf_1$Deviance, params_pf_2$Deviance, params_pf_3$Deviance, params_pf_4$Deviance, params_pf_5$Deviance)
+boxplot(params_pf_1_nm$sd_y, params_pf_1$sd_y, params_pf_2$sd_y, params_pf_3$sd_y, params_pf_4$sd_y, params_pf_5$sd_y)
+boxplot(params_pf_1_nm$sd_ta, params_pf_1$sd_ta, params_pf_2$sd_ta, params_pf_3$sd_ta, params_pf_4$sd_ta, params_pf_5$sd_ta)
 
 deviance <- 0
 for (i in ids) {
