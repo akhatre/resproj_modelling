@@ -78,7 +78,7 @@ t.test(avrg_rts$x[avrg_rts$id %in% names(ratios_block)], avrg_rts$x[avrg_rts$id 
 
 
 #scaling long data set ----
-s <- 100
+s <- 1/100
 long$prediction <- long$prediction*s
 long$locations <- long$locations*s
 long$update <- long$update*s
@@ -224,8 +224,8 @@ ll_pf_bootstrap <- function(par, ta0 = FALSE, y, r, num_of_particles = 1000, ran
   logTa_mean0 <- 4.9
   
   # other defaults
-  estim_mean0 <- 0.5 # CHANGED was 0.5 should set this to the middle of the screen!
-  estim_var0 <- 0.01 # CHANGED was 1
+  estim_mean0 <- 50 # CHANGED was 0.5 should set this to the middle of the screen!
+  estim_var0 <- 1000 # CHANGED was 1
   
   # screate matrices to store the particle values and weights
   n <- length(y)
@@ -297,7 +297,6 @@ pure_kalman_filter <- function(par, y, r, random_seed=12345) {
   # set parameters [2 params model]
   sd_y <- par[1] #noise of observations
   sd_vol <- par[2]
-  sd_r <- 6
   
   estim_state <- 50
   k <- 0
@@ -307,7 +306,7 @@ pure_kalman_filter <- function(par, y, r, random_seed=12345) {
     s[t+1] <- (1 - k[t+1])*(s[t] + sd_vol^2)
     estim_state[t+1] <- estim_state[t] + k[t+1] * (y[t] - estim_state[t])
   }
-  logLik <- -2*sum(dnorm(r, mean=estim_state, sd=sd_r, log=TRUE))
+  logLik <- -2*sum(dnorm(r, mean=estim_state, sd=sd_y, log=TRUE))
   return(logLik)
 }
 
@@ -918,3 +917,260 @@ for (i in ids) {
 }
 summary(deviance)
 summary(params_kalman$Deviance)
+
+ll_pf_dbg <- function(y, r, sd_y, sd_ta, sd_r, logTa_sd0, logTa_mean0, estim_mean0, estim_var0, num_of_particles = 1000, random_seed=12345) {
+  
+  # set random seed
+  set.seed(random_seed)
+
+  # sd_y <- par[1]
+  # sd_ta <- par[2]
+  # sd_r <- par[3]
+  # logTa_sd0 <- par[4]
+  # logTa_mean0 <- par[5]
+  # estim_mean0 <- par[6]
+  # estim_var0 <- par[7]
+  
+  # screate matrices to store the particle values and weights
+  n <- length(y)
+  logTa <- Ta <- Wa <- s <- k <- estim_state <- matrix(NA, ncol = num_of_particles, nrow = n)
+  mu_out <- rep(0.0,n)
+  
+  # draw the particles for the initial state from the prior distribution
+  logTa[1,] <- rnorm(num_of_particles, mean=logTa_mean0, sd=logTa_sd0)
+  # derived other particle values
+  Ta[1,] <- exp(logTa[1,])
+  estim_state[1,] <- rep(estim_mean0, num_of_particles)
+  k[1:2,] <- rep(0.0, num_of_particles)
+  s[1:2,] <- rep(estim_var0, num_of_particles)
+  # particle weights
+  Wa[1,] <- 1/num_of_particles
+  # save mu for output
+  mu_out[1] <- sum(Wa[1,]*estim_state[1,])
+  # loop over time
+  for(t in 1:(n-1)) {
+    
+    # sample particles according to the transition distribution
+    logTa[t+1,] <- rnorm(num_of_particles, mean=logTa[t,], sd=sd_ta)
+    
+    # compute derived other particle values
+    Ta[t+1,] <- exp(logTa[t+1,])
+    
+    k[t+1,] <- (s[t,] + Ta[t,]) / (s[t,] + Ta[t,] + sd_y^2)
+    s[t+1,] <- (1 - k[t+1,])*(s[t,] + Ta[t,])
+    estim_state[t+1,] <- estim_state[t,] + k[t+1,] * (y[t] - estim_state[t,])
+    
+    # compute the weights
+    Wa[t+1,] <- dnorm(y[t+1], mean = estim_state[t,], sd = sqrt(s[t+1,] + Ta[t+1,] + sd_y^2)) * Wa[t,] # could have multiplied by W, but not necessary with uniform weights
+    Wa[t+1,] <- Wa[t+1,]/sum(Wa[t+1,]) # normalize
+    
+    if (is.nan(sum(Wa[t+1,])) || sum(Wa[t+1,] == 0)) {
+      return(10000)
+    }
+    
+    # save mu for output
+    mu_out[t+1] <- sum(Wa[t+1,]*estim_state[t+1,])
+    
+    # draw indices of particles with systematic resampling
+    idx <- resample_systematic(Wa[t+1,])
+    
+    # implicitly W <- 1/num_of_particles
+    logTa[t+1,] <- logTa[t+1,idx]
+    Ta[t+1,] <- Ta[t+1,idx]
+    k[t+1,] <- k[t+1,idx]
+    s[t+1,] <- s[t+1,idx]
+    estim_state[t+1,] <- estim_state[t+1,idx]
+    
+    # reset the weights
+    Wa[t+1,] <- 1/num_of_particles
+  }
+  
+  logLik <- -2*sum(dnorm(r, mean=mu_out, sd=sd_r, log=TRUE))
+  return(logLik)
+}
+
+data = subset(long, id == "jT3xeBsAlRcydJvugXBrjKrvj0A3")
+plot(1:100, data$prediction, type = "l")
+lines(1:100, data$locations, type = "l", col = "red")
+
+y <- ratios_block$jT3xeBsAlRcydJvugXBrjKrvj0A3
+x <- 1:99
+lo <- loess(y ~ x)
+plot(x,y, ylim = c(-5,5), type = "l", ylab = "Learning rate", xlab = "Trial", col = "gray")
+lines(predict(lo), col = "red")
+lines(x,rep(1,99), lty="dashed", col = "cyan")
+lines(x,rep(0,99), lty="dashed", col = "cyan")
+lines(x, volatility_block[1:99]/15, col = "blue")
+
+sd_y <- seq(0,30, length.out = 50) #lower is always better, does not depend on anything else
+sd_ta <- 0.2
+sd_r <- seq(0,30, length.out = 50)
+logTa_sd0 <- 0.2
+logTa_mean0 <- 4.9
+estim_mean0 <- 50
+estim_var0 <- 100
+num_of_particles <- 500
+random_seed <- 12345
+
+deviance <- 0
+n <- 0
+for (a in 1:50) {
+  for(i in 1:50) {
+    n <- n + 1
+    # deviance[n] <- ll_pf_dbg(y = data$locations, r = data$prediction, sd_y = sd_y, sd_ta = sd_ta[a], sd_r = sd_r[i], logTa_mean0 = logTa_mean0, logTa_sd0 = logTa_sd0, estim_mean0 = estim_mean0, estim_var0 = estim_var0, num_of_particles = num_of_particles, random_seed = random_seed)
+    deviance[n] <- ll_pf_bootstrap(par = c(sd_y[a], 0.2, sd_r[i]), y = data$locations, r = data$prediction, num_of_particles = 500)
+  }
+}
+for (i in seq(180,270,10)) {
+  scatterplot3d(x = rep(sd_y, each = 50), y = rep(sd_r, 50), z = deviance, zlim = c(500,1000), angle = i)
+}
+
+deviance <- 0
+for(i in 1:25) {
+  deviance[i] <- ll_pf_dbg(y = data$locations, r = data$prediction, sd_y = sd_y, sd_ta = 0.2, sd_r = sd_r, logTa_mean0 = logTa_mean0, logTa_sd0 = logTa_sd0, estim_mean0 = estim_mean0, estim_var0 = estim_var0[i], num_of_particles = num_of_particles, random_seed = random_seed)
+  print(estim_var0[i])
+}
+plot(1:25, deviance)
+
+deviance <- 0
+n <- 0
+for (a in 1:10) {
+  for (b in 1:10) {
+    for(c in 1:10) {
+      n <- n + 1
+      deviance[n] <- ll_pf_dbg(y = data$locations, r = data$prediction, sd_y = sd_y[a], sd_ta = sd_ta[b], sd_r = sd_r[c], logTa_mean0 = logTa_mean0, logTa_sd0 = logTa_sd0, estim_mean0 = estim_mean0, estim_var0 = estim_var0, num_of_particles = num_of_particles, random_seed = random_seed)
+      if(deviance[n] == min(deviance)){print(c(deviance[n],sd_y[a],sd_ta[b],sd_r[c]))}
+    }
+  }
+}
+
+
+
+ll_pf_bootstrap <- function(par, ta0 = FALSE, y, r, num_of_particles = 1000, random_seed=12345) {
+  
+  # set random seed
+  set.seed(random_seed)
+  
+  # # set parameters [5 params model]
+  # sd_y <- exp(par[1]) #noise of observations
+  # sd_r <- exp(par[2]) #noise of participants' responses, unknown
+  # logTa_sd0 <- exp(par[3])
+  # logTa_mean0 <- par[4]
+  # if(ta0) {
+  #   sd_ta <- 0
+  # } else {
+  #   sd_ta <- exp(par[5]) #sd of particle update distribution
+  # }
+  
+  # set parameters [2 params model]
+  sd_y <- par[1] #noise of observations
+  sd_ta <- par[2] #sd of particle update distribution
+  sd_r <- par[3]
+  logTa_sd0 <- par[4]
+  logTa_mean0 <- par[5]
+  estim_mean0 <- 50 # CHANGED was 0.5 should set this to the middle of the screen!
+  estim_var0 <- par[6]
+  
+  # screate matrices to store the particle values and weights
+  n <- length(y)
+  logTa <- Ta <- Wa <- s <- k <- estim_state <- matrix(NA, ncol = num_of_particles, nrow = n)
+  mu_out <- rep(0.0,n)
+  
+  # draw the particles for the initial state from the prior distribution
+  logTa[1,] <- rnorm(num_of_particles, mean=logTa_mean0, sd=logTa_sd0)
+  # derived other particle values
+  Ta[1,] <- exp(logTa[1,])
+  estim_state[1,] <- rep(estim_mean0, num_of_particles)
+  k[1:2,] <- rep(0.0, num_of_particles)
+  s[1:2,] <- rep(estim_var0, num_of_particles)
+  # particle weights
+  Wa[1,] <- 1/num_of_particles
+  # save mu for output
+  mu_out[1] <- sum(Wa[1,]*estim_state[1,])
+  # loop over time
+  for(t in 1:(n-1)) {
+    
+    # sample particles according to the transition distribution
+    logTa[t+1,] <- rnorm(num_of_particles, mean=logTa[t,], sd=sd_ta)
+    
+    # compute derived other particle values
+    Ta[t+1,] <- exp(logTa[t+1,])
+    
+    k[t+1,] <- (s[t,] + Ta[t,]) / (s[t,] + Ta[t,] + sd_y^2)
+    s[t+1,] <- (1 - k[t+1,])*(s[t,] + Ta[t,]) #may be try taking Ta out of here
+    estim_state[t+1,] <- estim_state[t,] + k[t+1,] * (y[t] - estim_state[t,])
+    
+    # compute the weights
+    Wa[t+1,] <- dnorm(y[t+1], mean = estim_state[t,], sd = sqrt(s[t+1,] + Ta[t+1,] + sd_y^2)) * Wa[t,] # could have multiplied by W, but not necessary with uniform weights
+    Wa[t+1,] <- Wa[t+1,]/sum(Wa[t+1,]) # normalize
+    
+    if (is.nan(sum(Wa[t+1,])) || sum(Wa[t+1,] == 0)) {
+      return(10000)
+    }
+    
+    # save mu for output
+    mu_out[t+1] <- sum(Wa[t+1,]*estim_state[t+1,])
+    
+    # draw indices of particles with systematic resampling
+    idx <- resample_systematic(Wa[t+1,])
+    
+    # implicitly W <- 1/num_of_particles
+    logTa[t+1,] <- logTa[t+1,idx]
+    Ta[t+1,] <- Ta[t+1,idx]
+    k[t+1,] <- k[t+1,idx]
+    s[t+1,] <- s[t+1,idx]
+    estim_state[t+1,] <- estim_state[t+1,idx]
+    
+    # reset the weights
+    Wa[t+1,] <- 1/num_of_particles
+  }
+  
+  logLik <- -2*sum(dnorm(r, mean=mu_out, sd=sd_r, log=TRUE))
+  return(logLik)
+}
+delta_rule <- function(par, y, r, random_seed=12345) {
+  set.seed(random_seed)
+  n = length(y)
+  
+  # set parameters [2 params model]
+  # k <- par[1] #noise of observations
+  # sd_r <- par[2]
+  
+  # set parameters [1 param model]
+  k <- par[1] #noise of observations
+  sd_r <- par[2]
+  
+  estim_state <- 50
+  
+  for (t in 1:(n-1)) {
+    estim_state[t+1] <- estim_state[t] + k * (y[t] - estim_state[t])
+  }
+  
+  logLik <- -2*sum(dnorm(r, mean=estim_state, sd=sd_r, log=TRUE))
+  return(logLik)
+}
+
+cluster <- makeCluster(no_cores, type = "FORK")
+asd <- DEoptim(fn = ll_pf_bootstrap, lower = c(0, 0, 0, 0, -10, 0), upper = c(30, 1, 30, 30, 30, 1000), y = data$locations, r = data$prediction, random_seed = 12345, control = DEoptim.control(cluster = cluster))
+dsa <- DEoptim(fn = delta_rule, lower = c(0, 0), upper = c(1, 30), y = data$locations, r = data$prediction, control = DEoptim.control(cluster = cluster))
+summary(asd)
+summary(dsa)
+
+delta_and_pf <- function(par, y, r) {
+  pfll <- ll_pf_bootstrap(par = par[1:6], y = y, r = r)
+  dll <- delta_rule(par = c(par[7], par[3]), y = y, r = r)
+  return(pfll+dll)
+}
+
+asddsa <- DEoptim(fn = delta_and_pf, lower = c(0, 0, 0, 0, -10, 0, 0), upper = c(30, 1, 30, 30, 30, 1000, 2), y = data$locations, r = data$prediction, control = DEoptim.control(cluster = cluster))
+
+deviance <- 0
+k <- seq(0.1,2,0.1)
+for (i in 1:length(k)) {
+  deviance[i] <- delta_rule(par = k[i], y = data$locations, r = data$prediction)
+}
+plot(k, deviance, type = "l")
+
+
+
+

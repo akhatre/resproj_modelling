@@ -50,166 +50,122 @@ generate_data_fixed_vol <- function(num_of_trials, noise, vol, start_state) {
 # data <- generate_data_volatiliy_linear_increase(num_of_trials = 100, noise = 4, increase = 0.3, start_state = 0)
 # data <- generate_data_volatiliy_sinusoid(num_of_trials = 100, noise = 4, max = 30, min = 3, start_state = 0)
 data <- generate_data_volatiliy_block(num_of_trials = 100, noise = 4, block1_vol = 3, block2_vol = 30, start_state = 0)
-data <- generate_data_fixed_vol(100,2,0,0)
 
-plot(1:100, data$Observation+100, type = "l", ylab = "Share price", xlab = "Day (t)")
 
-# Plotting generated data ----
+par(mfrow = c(2,2), oma = c(0,0,0,0), mar = c(4,3,1,1))
+set.seed(123)
+n <- 50
+data <- generate_data_fixed_vol(n,5,1,0)
+plot(1:n, data$Observation+100, lty = 2, type = "l", xlab = "Trial", ylab = "", yaxt = "n")
+axis(side=2,labels=F) 
+lines(1:n, data$State+100, ylab = "Share price", xlab = "Day (t)", col = "red")
+lines(1:n, delta_subject(0.1, data$Observation+100), col = "blue")
 
-par(mfrow=c(1,1))
-plot(1:length(data$Observation), data$Observation, type = "l", col = "red")
-lines(data$Volatility, col = "green")
-legend(c(0, max(data$Observation)), lty = c(1,1), col = c("red", "green"), legend = c("Observations", "Volatility (true)"), bty = "n")
+set.seed(123)
+n <- 50
+data <- generate_data_fixed_vol(n,5,1,0)
+plot(1:n, data$Observation+100, lty = 2, type = "l",  xlab = "Trial", ylab = "", yaxt = "n")
+axis(side=2,labels=F) 
+lines(1:n, data$State+100,ylab = "Share price", xlab = "Day (t)", col = "red")
+lines(1:n, delta_subject(0.9, data$Observation+100), col = "blue")
 
-# Filters ----
+set.seed(123)
+n <- 50
+data <- generate_data_fixed_vol(n,1,5,0)
+plot(1:n, data$Observation+100, lty = 2, type = "l", xlab = "Trial", ylab = "", yaxt = "n")
+axis(side=2,labels=F) 
+lines(1:n, data$State+100, ylab = "Share price", xlab = "Day (t)", col = "red")
+lines(1:n, delta_subject(0.9, data$Observation+100), col = "blue")
 
-resample_systematic <- function(weights) {
-  # input: weights is a vector of length N with (unnormalized) importance weights
-  # output: a vector of length N with indices of the replicated particles
-  N <- length(weights)
-  weights <- weights/sum(weights)# normalize weights
-  csum <- cumsum(weights)
-  u1 <- runif(1,min=0,max=1/N) # draw a single uniform number
-  u <- c(0, seq(1/N, (N-1)/N, length = N-1)) + u1
-  idx <- vector("integer",length=length(weights))
-  j <- 1
-  for(i in 1:N) {
-    while (u[i] > csum[j]) {
-      j <- j + 1
+set.seed(123)
+data <- generate_data_fixed_vol(n,1,5,0)
+plot(1:n, data$Observation+100, lty = 2, type = "l", xlab = "Trial", ylab = "", yaxt = "n")
+axis(side=2,labels=F) 
+lines(1:n, data$State+100, ylab = "Share price", xlab = "Day (t)", col = "red")
+lines(1:n, delta_subject(0.1, data$Observation+100), col = "blue")
+
+delta_subject <- function(k, y) {
+  
+  #PARAMS
+  n = length(y)
+  estim_state <- 100
+  
+  #body
+  for (t in 1:(n-1)) {
+    estim_state[t+1] <- estim_state[t] + k * (y[t] - estim_state[t])
+  }
+
+  return(estim_state)
+}
+
+generate_data_behrens <- function(num_of_trials, noise, value1, value2, start_state) {
+  data <- data.frame(Volatility = rep(NA, 0.5*num_of_trials), State = start_state, Observation = rnorm(1, mean = start_state, sd = noise))
+  data$Volatility[1:0.5*num_of_trials] <- value1
+  data$Volatility[1:0.5*num_of_trials] <- value1
+  for (t in 2:num_of_trials) {
+    if (runif(1, min = 0, max = 1) < 0.05) {
+      data$State[t] <- data$State[t-1] + rnorm(1, mean = 0, sd = vol)
+    } else {
+      data$State[t] <- data$State[t-1]
     }
-    idx[i] <- j
+    data$Observation[t] <- data$State[t] + rnorm(1, mean = 0, sd = noise)
   }
-  return(idx)
+  return(data)
 }
 
-pf_bootstrap <- function(y, num_of_particles) {
-  # Bootstrap filter
-  # create matrices to store the particle values and weights
-  n <- length(y)
-  logTa <- Ta <- Wa <- s <- k <- estim_state <- matrix(NA, ncol = num_of_particles, nrow = n) 
-  
-  # draw the particles for the initial state from the prior distribution
-  
-  logTa[1,] <- rnorm(num_of_particles, mean=log(5), sd=1)
-  # set Ta to e^logTa
-  Ta[1,] <- exp(logTa[1,])
-  
-  estim_state[1,] <- rep(0, num_of_particles)
-  k[1:2,] <- rep(0, num_of_particles)
-  s[1:2,] <- rep(1000, num_of_particles)
-  
-  Wa[1,] <- 1/num_of_particles
-  
-  # loop over time
-  for(t in 1:(n-1)) {
-    
-    # sample particles according to the transition distribution
-    
-    logTa[t+1,] <- rnorm(num_of_particles,mean=logTa[t,], sd = 0.1)
-    # set Ta to e^logTa
-    Ta[t+1,] <- exp(logTa[t+1,])
-    
-    k[t+1,] <- (s[t,] + Ta[t,]) / (s[t,] + Ta[t,] + 4^2)
-    s[t+1,] <- (1 - k[t+1,])*(s[t,] + Ta[t,])
-    estim_state[t+1,] <- estim_state[t,] + k[t+1,] * (y[t] - estim_state[t,])
-    
-    # compute the weights
-    Wa[t+1,] <- dnorm(y[t+1], mean = estim_state[t,], sd = sqrt(s[t+1,] + Ta[t+1,] + 4^2)) * Wa[t,] # could have multiplied by W, but not necessary with uniform weights
-    Wa[t+1,] <- Wa[t+1,]/sum(Wa[t+1,]) # normalize
-    
-    # draw indices of particles with systematic resampling
-    idx <- resample_systematic(Wa[t+1,])
-    
-    # implicitly W <- 1/num_of_particles
-    logTa[t+1,] <- logTa[t+1,idx]
-    Ta[t+1,] <- Ta[t+1,idx]
-    k[t+1,] <- k[t+1,idx]
-    s[t+1,] <- s[t+1,idx]
-    estim_state[t+1,] <- estim_state[t+1,idx]
-    
-    # reset the weights
-    Wa[t+1,] <- 1/num_of_particles
+generate_data_nassar <- function(num_of_trials, noise, vol, start_state) {
+  data <- data.frame(Volatility = rep(NA, num_of_trials), State = start_state, Observation = rnorm(1, mean = start_state, sd = noise))
+  for (t in 2:num_of_trials) {
+    if (runif(1, min = 0, max = 1) < 0.04) {
+      data$State[t] <- data$State[t-1] + rnorm(1, mean = 0, sd = vol)
+    } else {
+      data$State[t] <- data$State[t-1]
+    }
+    data$Observation[t] <- data$State[t] + rnorm(1, mean = 0, sd = noise)
   }
-  
-  return(rowSums(sqrt(Ta)*Wa))
+  return(data)
 }
 
-pf_straight <- function(y, num_of_particles) {
-  # The same filter without resampling (straightforward SIS)
-  # create matrices to store the particle values and weights
-  n <- length(y)
-  Tb <- Wb <- s <- k <- estim_state <- matrix(NA, ncol = num_of_particles, nrow = n) 
-  
-  # draw the particles for the initial state from the prior distribution
-  Tb[1,] <- runif(num_of_particles, 0, 30^2)
-  Wb[1,] <- 1/num_of_particles
-  estim_state[1,] <- rep(0, num_of_particles)
-  k[1,] <- rep(0, num_of_particles)
-  s[1,] <- rep(1000, num_of_particles)
-  
-  for(t in 1:(n-1)) {
-    k[t+1,] <- (s[t,] + Tb[t,]) / (s[t,] + Tb[t,] + 4^2)
-    s[t+1,] <- (1 - k[t+1,])*(s[t,] + Tb[t,])
-    estim_state[t+1,] <- estim_state[t,] + k[t+1,] * (y[t] - estim_state[t,])
+generate_data_volatiliy_2_block <- function(num_of_trials, noise, block1_vol, block2_vol, start_state) {
+  data <- data.frame(Volatility = rep(block1_vol, num_of_trials), State = start_state, Observation = rnorm(1, mean = start_state, sd = noise))
+  for (t in 2:num_of_trials) {
     
-    # sample particles according to the transition distribution
-    Tb[t+1,] <- rtruncnorm(num_of_particles, a = 0, b = Inf, mean = Tb[t,], sd = 10)
+    if (t < num_of_trials/2) {
+      data$Volatility[t] <- block1_vol
+    } else {
+      data$Volatility[t] <- block2_vol
+    }
     
-    # compute the weights
-    Wb[t+1,] <- dnorm(y[t+1], mean = estim_state[t,], sd = sqrt(s[t+1,] + Tb[t+1,] + 4^2)) * Wb[t,]
-    Wb[t+1,] <- Wb[t+1,]/sum(Wb[t+1,])
-    
-    
+    sd = data$Volatility[t]
+    data$State[t] <- data$State[t-1] + rnorm(1, mean = 0, sd = sd)
+    data$Observation[t] <- data$State[t] + rnorm(1, mean = 0, sd = noise)
   }
-  
-  return(rowSums(sqrt(Tb)*Wb))
-  
+  return(data)
 }
 
-est_vol_bootstrap <- pf_bootstrap(y = data$Observation, num_of_particles = 2000)
-est_vol_straight <- pf_straight(y = data$Observation, num_of_particles = 2000)
+par(mfrow = c(2,2), oma = c(0,0,0,0), mar = c(4,3,1,1))
+layout(matrix(c(1,2,3,3), 2, 2, byrow = TRUE))
 
-# Plotting filters ----
+set.seed(3)
+n <- 600
+data <- generate_data_nassar(n,5,5,0)
+plot(1:n, data$State+100, type = "l", xlab = "Trial", ylab = "", col = "red", yaxt = "n")
+axis(side=2,labels=F) 
+# lines(1:n, data$State+100, ylab = "Share price", xlab = "Day (t)", col = "red")
+# lines(1:n, delta_subject(0.1, data$Observation+100), col = "blue")
 
-plot(1:length(data$Volatility), data$Volatility, ylab="Value", xlab="Time point (t)", type = "l")
-lines(est_vol_bootstrap, col = "red")
-lines(est_vol_straight, col = "green")
-legend(c(0, max(data$Volatility)), lty = c(1,1,1), col = c("black", "red", "green"), legend = c("Actual vol","Bootstrap filter (c=1)","SIS (c=0)"), bty="n")
+n <- 290
+plot(1:n, c(rep(75,120), rep(20,40), rep(80,40), rep(20,30), rep(80,30), rep(20,30)), type = "l", xlab = "Trial", ylab = "", col = "red", yaxt = "n")
+axis(side=2,labels=F) 
+polygon(c(120,120,290,290), c(20, 80, 80, 20), col="azure2", border = NA)
+polygon(c(0,0,120,120), c(20, 80, 80, 20), col="azure", border = NA)
+lines(1:n, c(rep(75,120), rep(20,40), rep(80,40), rep(20,30), rep(80,30), rep(20,30)), col = "red")
 
-# Simulating participant ----
-
-estim_vol <- est_vol_bootstrap #or straight
-
-klaman_filter <- function(estim_noise, estim_vol, observations) {
-  eta <- 0
-  pred <- 0
-  n <- length(observations) - 1
-  
-  for (t in 1:n) {
-    eta[t+1] <- estim_vol^2 / (estim_vol^2 + estim_noise)
-    pred[t+1] <- pred[t] + eta[t+1] * (observations[t] - pred[t])
-  }
-  return(pred)
-}
-
-plain_delta <- function(learning_rate, observations) {
-  pred <- 0
-  n <- length(observations) - 1
-  for (t in 1:n) {
-    pred[t+1] <- pred[t] + learning_rate * (observations[t] - pred[t])
-  }
-  return(pred)
-}
-
-
-pred <- klaman_filter(estim_noise = 2, estim_vol = 0, observations = data$Observation)
-pred <- plain_delta(learning_rate = 0.1, observations = data$Observation)
-
-par(mfrow=c(1,1))
-plot(data$Observation, type = "l")
-lines(pred, col = "green")
-legend(c(0, max(data$Observation)), lty = c(2,1,1), col = c("black", "black", "green"), legend = c("Observations","States","Predictions"), bty="n")
-
-
-
-
+set.seed(2)
+n <- 100
+data <- generate_data_volatiliy_2_block(n,10,7,30,0)
+plot(1:n, data$State, type = "l", xlab = "Trial", ylab = "", col = "red", yaxt = "n")
+axis(side=2,labels=F) 
+polygon(c(50,50,100,100), c(min(data$State), max(data$State), max(data$State), min(data$State)), col="azure2", border = NA)
+polygon(c(0,0,50,50), c(min(data$State), max(data$State), max(data$State), min(data$State)), col="azure", border = NA)
+lines(1:n, data$State, type = "l", xlab = "Trial", ylab = "", col = "red")
