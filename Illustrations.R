@@ -48,8 +48,21 @@ generate_data_fixed_vol <- function(num_of_trials, noise, vol, start_state) {
 }
 
 # data <- generate_data_volatiliy_linear_increase(num_of_trials = 100, noise = 4, increase = 0.3, start_state = 0)
-# data <- generate_data_volatiliy_sinusoid(num_of_trials = 100, noise = 4, max = 30, min = 3, start_state = 0)
+set.seed(123)
+
+par(mfcol = c(3,2), oma = c(0,0,0,0), mar = c(4,4,1,1))
+set.seed(123)
+data <- generate_data_volatiliy_sinusoid(num_of_trials = 100, noise = 4, max = 30, min = 3, start_state = 0)
+plot(1:100, data$Volatility, type = "l", ylab = "Volatility", xlab = "Trial",  col = "blue")
+plot(1:100, (data$State-min(data$State))/(max(data$State)-min(data$State)), type = "l", ylab = "Mean fish location", xlab = "Trial",  col = "red")
+plot(1:100, (data$Observation-min(data$Observation))/(max(data$Observation)-min(data$Observation)), type = "l", ylab = "Fish location", xlab = "Trial")
+
+set.seed(123)
 data <- generate_data_volatiliy_block(num_of_trials = 100, noise = 4, block1_vol = 3, block2_vol = 30, start_state = 0)
+plot(1:100, data$Volatility, type = "l", ylab = "Volatility", xlab = "Trial",  col = "blue")
+plot(1:100, (data$State-min(data$State))/(max(data$State)-min(data$State)), type = "l", ylab = "Mean fish location", xlab = "Trial",  col = "red")
+plot(1:100, (data$Observation-min(data$Observation))/(max(data$Observation)-min(data$Observation)), type = "l", ylab = "Fish location", xlab = "Trial")
+
 
 
 par(mfrow = c(2,2), oma = c(0,0,0,0), mar = c(4,3,1,1))

@@ -86,26 +86,26 @@ long$error <- long$error*s
 
 
 #direct learning rate estimation ----
-
+par(mfrow = c(1,2))
 #plotting learning rates - block
 y <- rowMeans(ratios_block)
 x <- 1:99
 lo <- loess(y ~ x)
-plot(x,y, ylim = c(-0.5,2), type = "l", ylab = "Learning rate", xlab = "Trial", col = "gray")
+plot(x,y, ylim = c(-0.5,2), type = "l", ylab = "Learning rate", xlab = "Trial", col = "gray50")
 lines(predict(lo), col = "red")
-lines(x,rep(1,99), lty="dashed", col = "cyan")
-lines(x,rep(0,99), lty="dashed", col = "cyan")
-lines(x, volatility_block[1:99]/35, col = "blue")
+lines(x,rep(1,99), lty="dashed", col = "purple")
+lines(x,rep(0,99), lty="dashed", col = "purple")
+lines(x, volatility_block[1:99]^2/(volatility_block[1:99]^2+16) , col = "blue")
 
 #plotting learning rates - sinusoid
 y <- rowMeans(ratios_sinusoid)
 x <- 1:99
 lo <- loess(y ~ x)
-plot(x,y, ylim = c(-5,5), type = "l", ylab = "Learning rate", xlab = "Trial", col = "gray")
+plot(x,y, ylim = c(-5,5), type = "l", ylab = "Learning rate", xlab = "Trial", col = "gray50")
 lines(predict(lo), col = "red")
-lines(x,rep(1,99), lty="dashed", col = "cyan")
-lines(x,rep(0,99), lty="dashed", col = "cyan")
-lines(x, volatility_sinusoid[1:99]/15, col = "blue")
+lines(x,rep(1,99), lty="dashed", col = "purple")
+lines(x,rep(0,99), lty="dashed", col = "purple")
+lines(x, volatility_sinusoid[1:99]^2/(volatility_sinusoid[1:99]^2+16), col = "blue")
 
 #plotting learning rates - average
 y <- rowMeans(data.frame(ratios_block,ratios_sinusoid))
@@ -172,8 +172,10 @@ long$set_as_number[long$set == "block"] <- -1
 long$set_as_number[long$set == "sinusoid"] <- 1
 long$eta <- 0.827  + 0.004 * long$volatility + 0.003 * long$set_as_number * long$volatility
 
-plot(1:100, long$eta[long$id == unique(long$id)[1]], type = "l", ylim=c(0,1.1), col = "blue", ylab = "Learning rate", xlab = "Trial")
-lines(1:100, long$eta[long$id == unique(long$id)[60]], col = "red")
+plot(1:100, long$eta[long$id == unique(long$id)[1]], type = "l", ylim=c(0,1), col = "red", ylab = "Learning rate", xlab = "Trial")
+lines(1:100, volatility_block[1:100]^2/(volatility_block[1:100]^2+16), col = "blue")
+plot(1:100, long$eta[long$id == unique(long$id)[60]], type = "l", ylim=c(0,1), col = "red", ylab = "Learning rate", xlab = "Trial")
+lines(1:100, volatility_sinusoid[1:100]^2/(volatility_sinusoid[1:100]^2+16), col = "blue")
 
 #models ----
 resample_systematic <- function(weights) {
